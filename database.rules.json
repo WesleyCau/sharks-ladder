@@ -1,0 +1,16 @@
+{
+  "rules": {
+    ".read": true,
+    "admins": {
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid && !root.child('admins').exists()"
+      }
+    },
+    "league": { ".write": true },
+    "players": { ".write": true },
+    "ratings": { ".write": true },
+    "seq": { ".write": true },
+    "version": { ".write": true },
+    "sessions": { ".write": true }
+  }
+}

@@ -1,0 +1,5 @@
+# League data and the organiser PIN stay on the organiser's computer
+data/
+__pycache__/
+*.pyc
+.claude/

@@ -1,0 +1,42 @@
+{
+  "rules": {
+    ".read": true,
+    "admins": {
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid && !root.child('admins').exists()"
+      }
+    },
+    "league": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).exists()"
+    },
+    "players": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).exists()"
+    },
+    "ratings": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).exists()"
+    },
+    "seq": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).exists()"
+    },
+    "version": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).exists()"
+    },
+    "sessions": {
+      ".write": "auth != null && root.child('admins').child(auth.uid).exists()",
+      "$sid": {
+        "games": {
+          "$gid": {
+            ".write": "(auth != null && root.child('admins').child(auth.uid).exists()) || (data.exists() && newData.exists() && root.child('sessions').child($sid).child('status').val() === 'live' && data.child('status').val() !== 'skipped' && (newData.child('status').val() === 'done' || newData.child('status').val() === 'pending') && newData.child('id').val() === data.child('id').val() && newData.child('pool').val() === data.child('pool').val() && newData.child('round').val() === data.child('round').val() && newData.child('t1').child('0').val() === data.child('t1').child('0').val() && newData.child('t1').child('1').val() === data.child('t1').child('1').val() && newData.child('t2').child('0').val() === data.child('t2').child('0').val() && newData.child('t2').child('1').val() === data.child('t2').child('1').val() && (!newData.child('s1').exists() || (newData.child('s1').isNumber() && newData.child('s1').val() >= 0 && newData.child('s1').val() <= 60)) && (!newData.child('s2').exists() || (newData.child('s2').isNumber() && newData.child('s2').val() >= 0 && newData.child('s2').val() <= 60)))"
+          }
+        },
+        "pools": {
+          "$i": {
+            "confirmed": {
+              ".write": "(auth != null && root.child('admins').child(auth.uid).exists()) || (root.child('sessions').child($sid).child('status').val() === 'live' && newData.isNumber() && ((!data.exists() && newData.val() === 1) || (data.exists() && newData.val() === data.val() + 1)))"
+            }
+          }
+        }
+      }
+    }
+  }
+}
