@@ -26,6 +26,24 @@ def pool_count(n):
     return k
 
 
+TARGETS = [11, 15, 21]
+
+
+def target_choices(base):
+    """Game targets a pool can play to: 11, 15 and 21, never shorter than the league's own setting."""
+    return sorted(t for t in set(TARGETS + [base]) if t >= base)
+
+
+def auto_target(sizes, n, base):
+    """The target that brings a pool of n home at about the same time as the others. Mirrors autoTarget in docs/core.js."""
+    ok = lambda k: scheduler.MIN_POOL <= k <= scheduler.MAX_POOL      # noqa: E731
+    if not ok(n):
+        return base
+    budget = max(scheduler.round_count(k) for k in sizes if ok(k)) * base * 1.1
+    fits = [t for t in target_choices(base) if scheduler.round_count(n) * t <= budget]
+    return fits[-1] if fits else base
+
+
 def courts_for(count):
     return 3 if count >= 12 else 2 if count >= 8 else 1
 
@@ -322,6 +340,21 @@ class Store:
             if not 1 <= courts <= 3:
                 raise ActionError("invalid", "A pool can use 1 to 3 courts.")
             pool["courts"] = courts
+        if "target" in a:
+            self._session(a.get("sid"), "setup")      # the target is fixed once the session has started
+            if a["target"] in ("auto", None):
+                pool.pop("target", None)
+                pool.pop("autoTarget", None)
+                return
+            choices = target_choices(self.state["league"]["pointsToWin"])
+            try:
+                t = int(a["target"])
+            except (TypeError, ValueError):
+                t = None
+            if t not in choices:
+                raise ActionError("invalid", "A pool can play first to %s." % " or ".join([", ".join(map(str, choices[:-1])), str(choices[-1])] if len(choices) > 1 else [str(choices[0])]))
+            pool["target"] = t
+            pool.pop("autoTarget", None)
 
     def do_session_schedule(self, a, org):
         sess = self._session(a.get("sid"), "setup")
@@ -351,8 +384,14 @@ class Store:
         sess = self._session(a.get("sid"), "setup")
         if not sess["games"]:
             self.do_session_schedule(a, org)
+        base = self.state["league"]["pointsToWin"]
+        sizes = [len(p["players"]) for p in sess["pools"]]
+        for p in sess["pools"]:
+            if not p.get("target"):
+                p["target"] = auto_target(sizes, len(p["players"]), base)
+                p["autoTarget"] = True
         sess["status"] = "live"
-        sess["pointsToWin"] = self.state["league"]["pointsToWin"]
+        sess["pointsToWin"] = base
 
     def do_session_unstart(self, a, org):
         sess = self._session(a.get("sid"), "live")
@@ -361,6 +400,8 @@ class Store:
         sess["status"] = "setup"
         for pool in sess["pools"]:
             pool["confirmed"] = 0
+            if pool.pop("autoTarget", None):
+                pool.pop("target", None)
 
     def do_session_reset(self, a, org):
         """Back to a fresh start for the same draw: no scores, every pool on round 1."""
@@ -404,7 +445,8 @@ class Store:
             raise ActionError("invalid", "Enter both scores.")
         if not (0 <= s1 <= 60 and 0 <= s2 <= 60) or s1 == s2:
             raise ActionError("invalid", "Scores must be different whole numbers.")
-        target = sess.get("pointsToWin") or self.state["league"]["pointsToWin"]
+        pool = next((p for p in sess["pools"] if p["id"] == g.get("pool")), None)
+        target = (pool or {}).get("target") or sess.get("pointsToWin") or self.state["league"]["pointsToWin"]
         if max(s1, s2) > target:
             raise ActionError("invalid", "Games are first to %d, so the winning score cannot be more than %d." % (target, target))
         if g["status"] == "skipped" and not org:

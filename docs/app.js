@@ -339,7 +339,7 @@ function fit(s) {
 function drawPool(s, p) {
   const r = roundInfo(s, p);
   return `<section class="dpool">
-    <a class="dp-head" href="#/court/${p.id}"><h2>${esc(p.name)}</h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></a>
+    <a class="dp-head" href="#/court/${p.id}"><h2>${esc(p.name)}</h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}${targetTag(s, p)}</span></a>
     ${p.rounds.map((ids, i) => {
       const games = ids.map(id => s.games[id]), on = new Set(games.flatMap(g => [...g.t1, ...g.t2])), sit = p.players.filter(x => !on.has(x));
       return `<div class="drd ${i < r.at ? "past" : i === r.at ? "now" : ""}"><span class="drd-n" aria-label="Round ${i + 1}"><small>R</small>${i + 1}</span><div class="drd-g">
@@ -425,7 +425,7 @@ function viewCourt(pid) {
   if (!s || s.status !== "live" || !pool) return `<a class="back" href="#/">‹ All pools</a><div class="head"><h1>No live games here</h1><p class="muted">This pool is not playing right now.</p></div>`;
   const r = roundInfo(s, pool);
   return `<div class="court"><a class="back" href="#/">‹ All pools</a>
-    <div class="head"><div class="row spread"><h1>${esc(pool.name)}</h1><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
+    <div class="head"><div class="row spread"><h1>${esc(pool.name)}</h1><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}${targetTag(s, pool)}</span></div>
       <span class="bar on-surface"><i style="width:${pct(r)}%"></i></span></div>
     ${r.finished ? '<div class="note"><b>All rounds finished.</b> Thanks for playing. Final standings are below.</div>' + backBlock(s, pool, r) : `
       <section class="stack">${roundCards(s, pool, r)}
@@ -445,7 +445,7 @@ function viewBoard() {
     <div class="board" style="${fit(s)}">${s.pools.map(p => {
       const r = roundInfo(s, p);
       return `<div class="stack">
-        <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}</span></div>
+        <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}${targetTag(s, p)}</span></div>
         ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r, true) + (r.sitting.length ? `<p class="sit now"><b>Sitting out now</b> ${namesList(r.sitting)}</p>` : "")}
         ${r.missed ? `<a class="note warn" href="#/court/${p.id}">⚠ ${r.missed === 1 ? "1 earlier game has" : r.missed + " earlier games have"} no score. Tap to enter.</a>` : ""}
         ${nextBox(p, r, true)}${backBlock(s, p, r)}
@@ -898,6 +898,13 @@ function poolPlan(n, courts) {
     : per > (courts || 1) && per > 2 ? "Three games a round: give this pool 3 courts, or it will run long." : "";
   return { per, rounds, each, warn, text: `${rounds} rounds of ${per} game${per > 1 ? "s" : ""}, ${each} games each` };
 }
+/* What a pool plays to, and whether that was chosen by hand. */
+const targetFor = (s, p) => Ladder.poolTarget(app.st, s, p);
+/* " · to 15", shown beside the round wherever pools on the night play to different targets or not to the league's own */
+function targetTag(s, p) {
+  const all = s.pools.map(q => targetFor(s, q));
+  return all.some(t => t !== all[0]) || all[0] !== app.st.league.pointsToWin ? ` · to ${targetFor(s, p)}` : "";
+}
 
 function orgSetup(s) {
   const q = (app.form.q || "").toLowerCase();
@@ -930,6 +937,7 @@ function orgSetup(s) {
     ${(app.confirm || "").startsWith("assign:") ? `<div class="note warn"><b>Re-assigning puts everyone back in rating order</b> and drops the changes made by hand.
       <div class="row" style="margin-top:8px"><button class="btn small primary" data-act="assign" data-sid="${s.id}" data-pools="${esc(app.confirm.slice(7))}">Yes, re-assign</button><button class="btn small" data-act="cancel">Keep my changes</button></div></div>` : ""}
     <p class="muted">${s.pools.length ? "Drag a player to another pool. On a touch screen, drag by the ⠿ handle on the right of their row. Or tap a player and choose where to move them." : "Players are ranked by 4DR and split into pools of eight or nine, two courts each. You can move anyone afterwards."}</p>
+    ${s.pools.length ? `<p class="muted small">Games are first to ${Ladder.targetChoices(app.st.league.pointsToWin).join(", ").replace(/, ([^,]*)$/, " or $1")}. Left on automatic, a pool with fewer rounds plays longer games so that every pool finishes at about the same time: "points of play" is rounds times the target. The score bonus in the 4DR is scaled, so a game to 15 or 21 is worth the same as a game to 11.</p>` : ""}
     ${oddN ? `<p class="note warn">⚠ <b>${oddN === 1 ? "1 player is" : oddN + " players are"} out of rating order</b>, shown in yellow. You can still start: you will be asked to confirm.</p>` : ""}
     ${loose.length ? `<div class="pool warn" data-drop="none"><h3>Not in a pool yet (${loose.length})</h3><ol>${loose.map(id => pl(id, null)).join("")}</ol></div>` : ""}
     <div class="pools dz">${s.pools.map(p => {
@@ -938,7 +946,9 @@ function orgSetup(s) {
         <div class="row spread"><h3>${esc(p.name)} <span class="muted num">(${n})</span></h3>
           <span class="seg" role="group" aria-label="${esc(p.name)} courts">${(n >= 12 || p.courts === 3 ? [1, 2, 3] : [1, 2]).map(k => `<button data-act="courts" data-sid="${s.id}" data-pool="${p.id}" data-courts="${k}" aria-pressed="${p.courts === k}">${k} court${k > 1 ? "s" : ""}</button>`).join("")}</span></div>
         ${bad ? `<p class="err">${bad}</p>` : ""}
-        ${plan ? `<p class="plan">${plan.text}${plan.warn ? `<span>⚠ ${plan.warn}</span>` : ""}</p>` : ""}
+        ${plan ? `<div class="row spread tgt"><span class="seg" role="group" aria-label="${esc(p.name)} games are first to">${Ladder.targetChoices(app.st.league.pointsToWin).map(t => `<button data-act="ptarget" data-sid="${s.id}" data-pool="${p.id}" data-target="${t}" aria-pressed="${targetFor(s, p) === t}">to ${t}</button>`).join("")}</span>
+          ${p.target ? `<button class="linkbtn" data-act="ptarget" data-sid="${s.id}" data-pool="${p.id}" data-target="auto">Back to automatic</button>` : '<span class="muted small">automatic</span>'}</div>` : ""}
+        ${plan ? `<p class="plan">${plan.text}, first to ${targetFor(s, p)} <b class="num">(${plan.rounds * targetFor(s, p)} points of play)</b>${plan.warn ? `<span>⚠ ${plan.warn}</span>` : ""}</p>` : ""}
         <ol>${p.players.map((id, i) => pl(id, i)).join("")}</ol></div>`;
     }).join("")}</div>
     ${errLine("pools")}</div>
@@ -1056,7 +1066,7 @@ function orgSettings() {
 function openFlow(sid, gid) {
   const s = sessById(sid), g = s && s.games[gid];
   if (!g) return;
-  app.flow = { sid, gid, step: "win", win: null, pts: s.pointsToWin || app.st.league.pointsToWin, ws: 0, ls: null, err: "", clash: null, busy: false, sure: false,
+  app.flow = { sid, gid, step: "win", win: null, pts: Ladder.gameTarget(app.st, s, gid), ws: 0, ls: null, err: "", clash: null, busy: false, sure: false,
     was: g.status === "done" ? { s1: g.s1, s2: g.s2 } : null,      // the score this screen set out to change, so a change made on another device is caught
     hist: s.status === "closed" };                                   // opened on a finished session, from Organiser, History
   render();
@@ -1085,7 +1095,7 @@ function viewFlow() {
       <div class="match is-done slim"><div class="side won"><div class="names"><em>Won</em>${team(winners)}</div><div class="pts">${pts}</div></div>
         <div class="side lost"><div class="names"><em>Lost</em>${team(losers)}</div><div class="pts ask">?</div></div></div>
       <p class="lead">First to ${pts}, win by 1. What did <b>${teamLine(losers)}</b> finish on?</p>
-      <div class="keys">${Array.from({ length: pts }, (_, i) => `<button class="key" data-act="fscore" data-ls="${i}">${i}</button>`).join("")}
+      <div class="keys${pts > 15 ? " k21" : pts > 12 ? " k15" : ""}">${Array.from({ length: pts }, (_, i) => `<button class="key" data-act="fscore" data-ls="${i}">${i}</button>`).join("")}
         <button class="key other" data-act="fother">Stopped early</button></div>`;
   } else if (f.step === "other") {
     const stepper = (label, key, v) => `<div class="step"><b>${label}</b><button class="key" data-act="fstep" data-key="${key}" data-d="-1" aria-label="Less">−</button><span class="val">${v}</span><button class="key" data-act="fstep" data-key="${key}" data-d="1" aria-label="More">+</button></div>`;
@@ -1119,7 +1129,7 @@ function viewDialog() {
     if (s.status !== "setup") { app.dialog = null; return ""; }
     const odd = outOfOrder(s), plans = s.pools.map(p => ({ p, plan: poolPlan(p.players.length, p.courts) })), slow = plans.filter(x => x.plan && x.plan.warn);
     return frame("Start session", `<h2>Start the session?</h2>
-      <div class="oddlist">${plans.map(({ p, plan }) => `<div class="odd"><b>${esc(p.name)}</b><span class="num">${p.players.length} players</span><span>${plan ? `${plan.text}, ${p.courts} court${p.courts > 1 ? "s" : ""}` : "needs 4 to 12 players"}</span></div>`).join("")}</div>
+      <div class="oddlist">${plans.map(({ p, plan }) => `<div class="odd"><b>${esc(p.name)}</b><span class="num">${p.players.length} players</span><span>${plan ? `${plan.text}, first to ${targetFor(s, p)}, ${p.courts} court${p.courts > 1 ? "s" : ""}` : "needs 4 to 12 players"}</span></div>`).join("")}</div>
       ${slow.length ? `<p class="note warn">⚠ ${slow.map(x => `<b>${esc(x.p.name)}</b>: ${x.plan.warn}`).join("<br>")}</p>` : ""}
       ${odd.length ? `<p class="lead"><b>${odd.length === 1 ? "1 player is" : odd.length + " players are"} out of rating order</b> because the pools were changed by hand:</p>
         <div class="oddlist">${odd.map(o => `<div class="odd"><b>${esc(nm(o.id))}</b><span class="num">${fmt(rating(o.id))}</span><span>${esc(o.pool.name)}, ${o.high ? "higher" : "lower"} than their rating</span></div>`).join("")}</div>` : ""}
@@ -1334,6 +1344,7 @@ const A = {
   pick: d => { app.sel = app.sel === d.pid ? null : d.pid; render(); },
   move: d => { app.sel = null; return act("pools", "session.move", { sid: d.sid, pid: d.pid, to: d.to }); },
   courts: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, courts: +d.courts }),
+  ptarget: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, target: d.target === "auto" ? "auto" : +d.target }),
   start: async d => {
     if (!d.force) { app.dialog = { kind: "start", sid: d.sid, busy: false, err: "" }; return render(); }     // always a summary first
     const j = await dialogRun("session.start", { sid: d.sid }, "Session started");

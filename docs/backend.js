@@ -101,7 +101,7 @@ const Backends = (() => {
     }[e && e.code] || "Could not sign in. Try again.");
 
     async function scoreLive(type, args, sess) {
-      const target = (sess && sess.pointsToWin) || state.league.pointsToWin;
+      const target = sess ? Ladder.gameTarget(state, sess, args.gid) : state.league.pointsToWin;
       let stop = null;
       try {
         if (type === "game.score") Ladder.checkScore(args);

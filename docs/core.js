@@ -23,6 +23,7 @@
 
   /* ---------------- rating engine ---------------- */
   const K_ELO = 100, K_PROB = 8.988, MAX_EXACT_ROUNDS = 9, SAMPLE_ORDERS = 20000;
+  const BONUS_BASE = 11, TARGETS = [11, 15, 21];      // the club's formula is for games to 11; pools can also play to 15 or 21
   const rnd = x => Math.floor(x + 0.5);
   const cache = new Map();
 
@@ -120,7 +121,10 @@
           if (games.length) rounds.push(games);
         }
         if (!rounds.length) continue;
-        const res = allOrders(start, rounds);
+        /* The score bonus is written for a game to 11. A longer game is scaled back to that, so it is worth the same. */
+        const T = pool.target || sess.pointsToWin || BONUS_BASE, scale = v => (T === BONUS_BASE ? v : Math.floor((2 * BONUS_BASE * v + T) / (2 * T)));
+        const rated = rounds.map(rd => rd.map(g => { const bl = scale(g.ls), bw = scale(g.ws - g.ls); return { gid: g.gid, win: g.win, lose: g.lose, ws: bw + bl, ls: bl }; }));
+        const res = allOrders(start, rated);
         for (const pid in res.ends) {
           rating[pid] = rnd(res.ends[pid]);
           rec[pid] = { pool: pool.id, start: start[pid], end: rating[pid], w: 0, l: 0, pf: 0, pa: 0 };
@@ -377,6 +381,20 @@
     if (k > 1 && Math.floor(n / k) < 8 && Math.ceil(n / (k - 1)) <= 11) k--;
     return k;
   }
+  /* Game targets a pool can play to: 11, 15 and 21, never shorter than the league's own setting. */
+  const targetChoices = base => [...new Set(TARGETS.concat(base))].filter(t => t >= base).sort((a, b) => a - b);
+  /* The target that brings a pool of n home at about the same time as the others. A night is as long as its longest pool
+     playing to the league's setting (rounds x points); a pool with fewer rounds plays longer games to fill that time,
+     to within 10%. Eights and nines together: the nines play 9 rounds to 11 (99), the eights 7 rounds to 15 (105). */
+  function autoTarget(sizes, n, base) {
+    const ok = k => k >= MIN_POOL && k <= MAX_POOL;
+    if (!ok(n)) return base;
+    const budget = Math.max(...sizes.filter(ok).map(roundCount)) * base * 1.1;
+    return targetChoices(base).filter(t => roundCount(n) * t <= budget).pop() || base;
+  }
+  /* What a pool plays to: the organiser's choice, else (before the start) the automatic one, else what the session started with. */
+  const poolTarget = (st, s, pool) => pool.target || (s.status === "setup" ? autoTarget(s.pools.map(p => p.players.length), pool.players.length, st.league.pointsToWin) : s.pointsToWin || st.league.pointsToWin);
+  const gameTarget = (st, s, gid) => { const g = s.games && s.games[gid], pool = g && s.pools.find(p => p.id === g.pool); return (pool && pool.target) || s.pointsToWin || st.league.pointsToWin; };
   /* Courts a pool of this size plays on: two games a round from eight players up, three for twelve. */
   const courtsFor = count => (count >= 12 ? 3 : count >= 8 ? 2 : 1);
   H["session.assign"] = (st, a) => {
@@ -413,6 +431,13 @@
       s2.pools.pop(); return;
     }
     if ("courts" in a) { const c = parseInt(a.courts, 10); if (!(c >= 1 && c <= 3)) fail("invalid", "A pool can use 1 to 3 courts."); pool.courts = c; }
+    if ("target" in a) {
+      getSession(st, a.sid, "setup");                                   // the target is fixed once the session has started
+      if (a.target === "auto" || a.target === null) { delete pool.target; delete pool.autoTarget; return; }
+      const t = parseInt(a.target, 10), choices = targetChoices(st.league.pointsToWin);
+      if (!choices.includes(t)) fail("invalid", `A pool can play first to ${choices.join(", ").replace(/, ([^,]*)$/, " or $1")}.`);
+      pool.target = t; delete pool.autoTarget;
+    }
   };
   H["session.schedule"] = (st, a) => {
     const s = getSession(st, a.sid, "setup");
@@ -433,11 +458,13 @@
   H["session.start"] = (st, a, org) => {
     const s = getSession(st, a.sid, "setup");
     if (!Object.keys(s.games).length) H["session.schedule"](st, a, org);
+    /* every pool keeps the target it starts with, whatever the league setting or the pool sizes do later */
+    const sizes = s.pools.map(p => p.players.length);
+    s.pools.forEach(p => { if (!p.target) { p.target = autoTarget(sizes, p.players.length, st.league.pointsToWin); p.autoTarget = true; } });
     s.status = "live";
-    s.pointsToWin = st.league.pointsToWin;      // the session keeps the target it started with, whatever the league setting does later
+    s.pointsToWin = st.league.pointsToWin;
   };
-  const targetOf = (st, s) => s.pointsToWin || st.league.pointsToWin;
-  H["session.unstart"] = (st, a) => { const s = getSession(st, a.sid, "live"); if (doneGames(s).length) fail("scores", "Scores have been entered, so the session cannot go back to setup."); s.status = "setup"; s.pools.forEach(p => { p.confirmed = 0; }); };
+  H["session.unstart"] = (st, a) => { const s = getSession(st, a.sid, "live"); if (doneGames(s).length) fail("scores", "Scores have been entered, so the session cannot go back to setup."); s.status = "setup"; s.pools.forEach(p => { p.confirmed = 0; if (p.autoTarget) { delete p.target; delete p.autoTarget; } }); };
   /* Back to a fresh start for the same draw: no scores, every pool on round 1. */
   H["session.reset"] = (st, a) => {
     const s = getSession(st, a.sid, "live");
@@ -480,7 +507,7 @@
     delete out.auto;
     return out;
   }
-  H["game.score"] = (st, a, org) => { const { s, g } = getGame(st, a, org); s.games[g.id] = scoreGame(g, a, org, targetOf(st, s)); if (s.status === "closed") recompute(st); };
+  H["game.score"] = (st, a, org) => { const { s, g } = getGame(st, a, org); s.games[g.id] = scoreGame(g, a, org, gameTarget(st, s, g.id)); if (s.status === "closed") recompute(st); };
   H["game.clear"] = (st, a, org) => {
     const { s, g } = getGame(st, a, org);
     g.s1 = null; g.s2 = null; g.status = s.status === "closed" ? "skipped" : "pending"; delete g.at; delete g.auto;
@@ -549,6 +576,6 @@
     return result;
   }
 
-  Object.assign(L, { rng, allOrders, compute, roundCount, poolCount, courtsFor, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
+  Object.assign(L, { rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));

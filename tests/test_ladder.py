@@ -308,6 +308,44 @@ class StoreTest(unittest.TestCase):
         st.apply("session.assign", dict(sid=sid), org=True)
         self.assertEqual([len(p["players"]) for p in sess["pools"]], [11, 11])       # 22: two elevens, not 8, 7, 7
 
+    def test_pool_targets(self):
+        from ladder.store import auto_target, target_choices
+        from ladder import engine
+        self.assertEqual(target_choices(11), [11, 15, 21])
+        self.assertEqual([auto_target([8, 8, 9, 9], n, 11) for n in (8, 9)], [15, 11])
+        self.assertEqual(auto_target([8, 8, 8], 8, 11), 11)
+        self.assertEqual([auto_target([8, 9], n, 15) for n in (8, 9)], [21, 15])
+        self.assertEqual(engine.scaled(11, 7, 11), (11, 7))
+        self.assertEqual(engine.scaled(21, 20, 21), (11, 10))       # winners +1, losers +10: the same as 11-10
+        self.assertEqual(engine.scaled(15, 0, 15), (11, 0))
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-27"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.attend", dict(sid=sid, pid=sess["attending"][0], on=False), org=True)
+        st.apply("session.attend", dict(sid=sid, pid=sess["attending"][0], on=False), org=True)
+        st.apply("session.assign", dict(sid=sid), org=True)
+        self.assertEqual([len(p["players"]) for p in sess["pools"]], [8, 8, 9])
+        with self.assertRaises(ActionError) as cm:
+            st.apply("session.pool", dict(sid=sid, pool="A", target=13), org=True)
+        self.assertEqual(cm.exception.code, "invalid")
+        st.apply("session.pool", dict(sid=sid, pool="C", target=21), org=True)
+        st.apply("session.start", dict(sid=sid), org=True)
+        self.assertEqual([p["target"] for p in sess["pools"]], [15, 15, 21])
+        with self.assertRaises(ActionError):
+            st.apply("session.pool", dict(sid=sid, pool="A", target=11), org=True)
+        gid = sess["pools"][0]["rounds"][0][0]
+        with self.assertRaises(ActionError) as cm:
+            st.apply("game.score", dict(sid=sid, gid=gid, s1=16, s2=14), org=False)
+        self.assertEqual(cm.exception.code, "invalid")
+        st.apply("game.score", dict(sid=sid, gid=gid, s1=15, s2=14), org=False)
+        st.apply("session.close", dict(sid=sid), org=True)
+        g = sess["games"][gid]
+        rec = st.state["ratings"]["sessions"][sid]
+        gain = [rec[p]["end"] - rec[p]["start"] for p in g["t1"] + g["t2"]]
+        self.assertEqual(gain[0], gain[1])
+        self.assertEqual(gain[2], gain[3])
+        self.assertIn(gain[0] + gain[2], (11, 12))       # winners' 1 + losers' 10, the result itself cancels (or 0.001 on a half)
+
     def test_pool_count(self):
         from ladder.store import pool_count
         want = {8: 1, 9: 1, 16: 2, 18: 2, 20: 2, 23: 3, 24: 3, 25: 3, 27: 3, 28: 3, 31: 3, 32: 4, 33: 4, 34: 4, 36: 4, 37: 4, 39: 4, 40: 5, 45: 5, 48: 6}

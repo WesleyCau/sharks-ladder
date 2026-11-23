@@ -20,6 +20,7 @@ K_ELO = 100
 K_PROB = 8.988
 MAX_EXACT_ROUNDS = 9      # 9! = 362,880 orders; beyond that, sample. Must match docs/core.js
 SAMPLE_ORDERS = 20000
+BONUS_BASE = 11            # the club's formula is for games to 11; a longer game's score bonus is scaled back to that
 _ENGINE = "sharks-1"      # change this if the formula changes: it retires the results kept on disk
 
 _cache = {}
@@ -168,6 +169,19 @@ def all_orders(start, rounds):
     return ends, games
 
 
+def target_of(sess, pool):
+    return pool.get("target") or sess.get("pointsToWin") or BONUS_BASE
+
+
+def scaled(win_score, lose_score, target):
+    """(ws, ls) as the engine wants them, with the bonus scaled to a game to 11. Unchanged when the game was to 11."""
+    if target == BONUS_BASE:
+        return win_score, lose_score
+    bl = (2 * BONUS_BASE * lose_score + target) // (2 * target)
+    bw = (2 * BONUS_BASE * (win_score - lose_score) + target) // (2 * target)
+    return bw + bl, bl
+
+
 def step(prob, ws, ls):
     """One game's change for the winners and the losers, in thousandths, from the winners' win probability."""
     e = 10000 - math.floor(prob * 10000 + 0.5)
@@ -189,7 +203,7 @@ def play_order(state):
                         continue
                     win, lose, ws, ls = (g["t1"], g["t2"], g["s1"], g["s2"]) if g["s1"] > g["s2"] else (g["t2"], g["t1"], g["s2"], g["s1"])
                     prob = 1 / (1 + math.exp(-K_PROB * (rating[win[0]] + rating[win[1]] - rating[lose[0]] - rating[lose[1]]) / 2000))
-                    dw, dl = step(prob, ws, ls)
+                    dw, dl = step(prob, *scaled(ws, ls, target_of(sess, pool)))
                     for pid in win:
                         rating[pid] += dw
                     for pid in lose:
@@ -226,7 +240,8 @@ def compute(state):
                     rounds.append(games)
             if not rounds:
                 continue
-            ends, gmean = all_orders(start, rounds)
+            target = target_of(sess, pool)
+            ends, gmean = all_orders(start, [[(gid, win, lose) + scaled(ws, ls, target) for gid, win, lose, ws, ls in rd] for rd in rounds])
             for pid, v in ends.items():
                 rating[pid] = rnd(v)
                 rec[pid] = dict(pool=pool["id"], start=start[pid], end=rating[pid], w=0, l=0, pf=0, pa=0)

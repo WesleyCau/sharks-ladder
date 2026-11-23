@@ -94,7 +94,7 @@ test("full session flow: pools, new player, scores, clash, close, correction", (
   let i = 0;
   for (const g of Object.values(sess.games)) if (g.pool === "A" && g.status === "pending") {
     const ls = (i * 3) % 10, t1Wins = i++ % 3 !== 0;
-    L.apply(st, "game.score", { sid, gid: g.id, s1: t1Wins ? 11 : ls, s2: t1Wins ? ls : 11 }, false);
+    L.apply(st, "game.score", { sid, gid: g.id, s1: t1Wins ? 15 : ls, s2: t1Wins ? ls : 15 }, false);
   }
   throwsCode(() => L.apply(st, "session.close", { sid }, false), "pin");
   L.apply(st, "session.close", { sid }, true);
@@ -103,8 +103,14 @@ test("full session flow: pools, new player, scores, clash, close, correction", (
   assert.strictEqual(st.ratings.current[sess.pools[1].players[0]], before[sess.pools[1].players[0]]);
   const rec = st.ratings.sessions[sid][sess.pools[0].players[0]];
   assert.strictEqual(rec.w + rec.l, 7);
+  /* Pool A is an eight on a night with a nine, so it played to 15: the bonus is scaled back to a game to 11.
+     Each game adds twice (winners' bonus + losers' bonus) across its four players, plus 0.002 on an exact half-thousandth. */
+  assert.deepStrictEqual(sess.pools.map(p => p.target), [15, 15, 11, 15]);
+  const sc = v => Math.floor((22 * v + 15) / 30);
+  const want = Object.values(sess.games).filter(g => g.pool === "A" && g.status === "done").reduce((t, g) => { const w = Math.max(g.s1, g.s2), l = Math.min(g.s1, g.s2); return t + 2 * (sc(w - l) + sc(l)); }, 0);
   const sum = Object.values(st.ratings.sessions[sid]).reduce((t, r) => t + r.end - r.start, 0);
-  assert.ok(Math.abs(sum - 14 * 22) <= 8, "every 11-point game adds 0.022 across four players, got " + sum);
+  assert.ok(want > 14 * 18 && want < 14 * 26, "a game to 15 is worth about what a game to 11 is, got " + want);
+  assert.ok(sum - want >= -8 && sum - want <= 8, "ratings moved by the scaled bonus, got " + sum + " against " + want);
 
   throwsCode(() => L.apply(st, "game.score", { sid, gid, s1: 11, s2: 9, replace: true }, false), "pin");
   const after = JSON.stringify(st.ratings.current);
@@ -237,6 +243,47 @@ test("pool count: eights and nines where they fit, tens and elevens before seven
   assert.strictEqual(sizes(34), "8,8,9,9");
   assert.strictEqual(sizes(25), "8,8,9");
   assert.strictEqual(sizes(33), "8,8,8,9");
+});
+
+test("game target per pool: automatic by pool size, set by hand, fixed at the start, score cap", () => {
+  assert.deepStrictEqual(L.targetChoices(11), [11, 15, 21]);
+  assert.deepStrictEqual(L.targetChoices(15), [15, 21]);
+  assert.strictEqual(L.autoTarget([8, 8, 8, 8], 8, 11), 11);        // all the same size: the league setting
+  assert.strictEqual(L.autoTarget([8, 8, 9, 9], 8, 11), 15);        // 7 rounds to 15 (105) beside 9 rounds to 11 (99)
+  assert.strictEqual(L.autoTarget([8, 8, 9, 9], 9, 11), 11);
+  assert.strictEqual(L.autoTarget([10, 9, 9], 9, 11), 11);
+  assert.strictEqual(L.autoTarget([8, 9], 8, 15), 21);              // a longer night: 147 beside 135
+  assert.strictEqual(L.autoTarget([8, 9], 9, 15), 15);
+  const st = league(34), sid = L.apply(st, "session.create", { date: "2026-11-27" }, true).id, sess = st.sessions[0];
+  L.apply(st, "session.assign", { sid }, true);
+  assert.deepStrictEqual(sess.pools.map(p => p.players.length), [8, 8, 9, 9]);
+  assert.deepStrictEqual(sess.pools.map(p => L.poolTarget(st, sess, p)), [15, 15, 11, 11]);
+  assert.ok(sess.pools.every(p => p.target === undefined));         // automatic until the start
+  throwsCode(() => L.apply(st, "session.pool", { sid, pool: "A", target: 13 }, true), "invalid");
+  throwsCode(() => L.apply(st, "session.pool", { sid, pool: "A", target: 21 }, false), "pin");
+  L.apply(st, "session.pool", { sid, pool: "D", target: 21 }, true);
+  L.apply(st, "session.pool", { sid, pool: "A", target: 11 }, true);
+  L.apply(st, "session.pool", { sid, pool: "A", target: "auto" }, true);
+  assert.deepStrictEqual(sess.pools.map(p => L.poolTarget(st, sess, p)), [15, 15, 11, 21]);
+  L.apply(st, "session.start", { sid }, true);
+  assert.deepStrictEqual(sess.pools.map(p => p.target), [15, 15, 11, 21]);
+  throwsCode(() => L.apply(st, "session.pool", { sid, pool: "B", target: 11 }, true), "status");
+  L.apply(st, "session.unstart", { sid }, true);
+  assert.deepStrictEqual(sess.pools.map(p => p.target), [undefined, undefined, undefined, 21]);      // hand-set stays, automatic is worked out again
+  L.apply(st, "session.start", { sid }, true);
+  const a = sess.pools[0].rounds[0][0], c = sess.pools[2].rounds[0][0], d = sess.pools[3].rounds[0][0];
+  throwsCode(() => L.apply(st, "game.score", { sid, gid: c, s1: 15, s2: 9 }, false), "invalid");      // the nines play to 11
+  L.apply(st, "game.score", { sid, gid: c, s1: 11, s2: 9 }, false);
+  L.apply(st, "game.score", { sid, gid: a, s1: 15, s2: 9 }, false);
+  throwsCode(() => L.apply(st, "game.score", { sid, gid: d, s1: 22, s2: 20 }, false), "invalid");
+  L.apply(st, "game.score", { sid, gid: d, s1: 21, s2: 20 }, false);
+  assert.strictEqual(L.gameTarget(st, sess, a), 15);
+  L.apply(st, "session.close", { sid }, true);
+  /* one game in the pool, so its change is the formula on the seeds: a 21-20 game adds no more bonus than an 11-10 one */
+  const top = sess.games[d], seed = id => st.players[id].seed, r = st.ratings.sessions[sid];
+  const prob = 1 / (1 + Math.exp(-8.988 * (seed(top.t1[0]) + seed(top.t1[1]) - seed(top.t2[0]) - seed(top.t2[1])) / 2000)), e = 10000 - Math.floor(prob * 10000 + 0.5);
+  assert.strictEqual(r[top.t1[0]].end - r[top.t1[0]].start, Math.floor((e + 50) / 100) + 1);       // winners: round(1 x 11/21) = 1
+  assert.strictEqual(r[top.t2[0]].end - r[top.t2[0]].start, 10 - Math.floor((e + 49) / 100));      // losers: round(20 x 11/21) = 10
 });
 
 test("same as last week: attendance copied from the last finished session", () => {

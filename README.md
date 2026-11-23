@@ -6,6 +6,7 @@ It is a separate site from the Adelaide ladder manager it grew out of: its own c
 
 - **Pools:** players attending are ranked by 4DR and split into pools of eight or nine, two courts each. 36 players is four pools of nine; 34 is 8, 8, 9, 9; 28 to 31 use tens and elevens so that nobody lands in a pool of seven. The organiser can move anyone.
 - **Schedule:** a pool of eight plays 7 rounds, partnering everyone once and opposing everyone twice. A pool of nine plays 9 rounds with one player sitting out each round. Pools of 4 to 12 get an even schedule.
+- **Game length:** each pool plays first to 11, 15 or 21. Left on automatic, a pool with fewer rounds plays longer games so the pools finish together: on a night of eights and nines the nines play 9 rounds to 11 (99 points) and the eights 7 rounds to 15 (105). The organiser can set any pool by hand before the start. The score bonus is scaled to a game to 11, so a longer game is worth the same.
 - **Scores:** tap the winning pair, tap the losing score, save. Any phone or tablet can enter a score while a session is live.
 - **4DR:** the club's per-game formula. Win chance from the gap between the two pairs' average 4DR, up to 0.100 for the result, plus the score bonus (winners +(W-L)/1000, losers +L/1000).
 
