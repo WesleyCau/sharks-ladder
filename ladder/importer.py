@@ -27,7 +27,7 @@ def build(source=SOURCE, name="Southern Sharks PC Season 7"):
         state["seq"]["p"] += 1
         pid = "p%d" % state["seq"]["p"]
         ids[r["Player"]] = pid
-        state["players"][pid] = dict(id=pid, name=r["Player"], active=True, seed=int(round(float(r["Seed"]) * 1000)))
+        state["players"][pid] = dict(id=pid, name=r["Player"], active=r.get("Active", "yes") != "no", seed=int(round(float(r["Seed"]) * 1000)))
     for date in sorted({w["date"] for w in weekly}):
         wk = [w for w in weekly if w["date"] == date]
         starts = {}
