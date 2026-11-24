@@ -55,7 +55,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "LadderLeague/0.1"
 
     def log_message(self, fmt, *args):
-        if "/api/state" not in (args[0] if args else ""):
+        if "/api/state" not in str(args[0] if args else ""):      # str: for a refused request the first value is a status code, not text
             sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
 
     def _send(self, code, body=b"", ctype="application/json"):
