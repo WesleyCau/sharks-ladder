@@ -164,92 +164,68 @@ function fillBoard() {
   }
 }
 
-/* ---------- what is pickleball: the page behind the league name ---------- */
-/* One court seen from above, five things to show on it. Court units are feet x 10: 440 long, 200 wide, net at 220, kitchen lines at 150 and 290. */
-const PB = [
-  ["rally", "The rally", "A rally in ten seconds", "Serve deep (1). Return deep (2). Then the shot the whole game hinges on: a soft drop into the kitchen (3), so the serving pair can walk up to the net. After that it is fast hands at close range until somebody blinks."],
-  ["serve", "Serve", "The serve", "Underhand, struck below the waist, from behind the baseline. It goes diagonally and has to land past the kitchen, line included. You get one go."],
-  ["bounce", "Two bounces", "The two-bounce rule", "The serve has to bounce before it is returned (1). The return has to bounce too (2). Only then can anyone hit the ball out of the air. No serve and volley: that is why rallies last."],
-  ["kitchen", "The kitchen", "The kitchen", "The 2.13 m strip either side of the net. You cannot volley while standing in it or touching its line, and your momentum cannot carry you in afterwards. Once the ball has bounced, step in and play it. This one rule is why the game is about touch, not just power."],
-  ["score", "Scoring", "Scoring", "Classic rules: you only score when your side is serving. Games go to 11, win by two. In doubles the score is called as three numbers: your score, their score, then whether you are the first or second server. So 4-2-1 means we lead 4-2 and I am server one."]
-];
-const PB_SHOTS = [
-  ["Dink", "A soft shot that drops into the other kitchen. Unattackable when it is good. Twenty in a row is normal.", "side", "M44 46 Q60 22 78 50"],
-  ["Third shot drop", "From the back of the court, a high soft arc that dies in the kitchen. It buys the time to reach the net.", "side", "M8 44 Q50 0 76 50"],
-  ["Drive", "Flat and hard, aimed at a hip or at the gap between two players.", "side", "M8 42 Q60 29 114 41"],
-  ["Lob", "Over their heads when they crowd the net. Glorious when it works. A free smash for them when it does not.", "side", "M42 46 Q72 -34 114 50"],
-  ["Erne", "Leap around the corner of the kitchen and volley from outside the sideline, right at the net. Legal, cheeky, and named after Erne Perry.", "erne", ""],
-  ["ATP", "Around the post. Dragged wide enough, you can hit the ball around the net post instead of over the net, even below net height.", "atp", ""]
-];
-function pbShot(kind, path) {
-  const ball = (x, y) => `<circle class="b" cx="${x}" cy="${y}" r="3.6"/>`;
-  if (kind === "side") {
-    const end = path.split(" ").slice(-2).map(Number);
-    return `<svg viewBox="0 0 120 60" aria-hidden="true"><line class="g" x1="2" y1="52" x2="118" y2="52"/><line class="n" x1="60" y1="38" x2="60" y2="52"/><path class="t" d="${path}"/>${ball(end[0], end[1])}</svg>`;
-  }
-  if (kind === "erne") return `<svg viewBox="0 0 120 60" aria-hidden="true"><rect class="k" x="26" y="6" width="34" height="38"/><rect class="k" x="60" y="6" width="34" height="38"/><line class="g" x1="2" y1="44" x2="118" y2="44"/><line class="n" x1="60" y1="2" x2="60" y2="48"/><path class="p" d="M16 36 Q30 58 55 51"/><circle class="pl" cx="55" cy="51" r="5"/><path class="t" d="M57 49 L96 30"/>${ball(96, 30)}</svg>`;
-  return `<svg viewBox="0 0 120 60" aria-hidden="true"><line class="g" x1="2" y1="40" x2="118" y2="40"/><line class="n" x1="60" y1="2" x2="60" y2="40"/><circle class="post" cx="60" cy="40" r="3"/><circle class="pl" cx="20" cy="54" r="5"/><path class="t" d="M24 53 Q62 58 100 26"/>${ball(100, 26)}</svg>`;
-}
+/* ---------- the page behind the league name: the club's front page ---------- */
+/* The players' photo and the club's Ladder League logo, last season's champion, then who is winning now.
+   The pictures and the words (headline, kicker, champion) come from club in config.js. */
 function viewPickleball() {
-  const show = PB.some(x => x[0] === app.pb) ? app.pb : "rally", target = app.st.league.pointsToWin, size = app.st.league.poolSize;
-  const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const dot = (x, y, n) => `<g class="bn"><circle cx="${x}" cy="${y}" r="13"/><text x="${x}" y="${y + 6}">${n}</text></g>`;
-  const rally = "M-6 150 L395 48 L446 42 L70 110 L20 118 L262 128 L286 136 L186 72 L162 62 L256 58 L282 52 L180 140 L160 150 L262 96 L284 90 L176 100 L158 104 L420 186";
-  const court = `
-  <svg class="pbcourt" viewBox="-40 -46 520 304" role="img" aria-label="A pickleball court seen from above: a net across the middle, a kitchen zone either side of it, and two service courts behind each kitchen.">
-    <defs><marker id="pbarr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#e6ff3a"/></marker></defs>
-    <rect class="surf" x="0" y="0" width="440" height="200"/>
-    <rect class="kz" x="150" y="0" width="140" height="200"/>
-    <g class="ov ov-serve"><rect class="hit" x="290" y="0" width="150" height="100"/><rect class="miss" x="220" y="0" width="70" height="100"/></g>
-    <g class="ln"><rect x="0" y="0" width="440" height="200"/><line x1="150" y1="0" x2="150" y2="200"/><line x1="290" y1="0" x2="290" y2="200"/><line x1="0" y1="100" x2="150" y2="100"/><line x1="290" y1="100" x2="440" y2="100"/></g>
-    <text class="kt" transform="translate(191 100) rotate(-90)">KITCHEN</text><text class="kt kt2" transform="translate(261 100) rotate(90)">KITCHEN</text>
-    <line class="net" x1="220" y1="-12" x2="220" y2="212"/><circle class="post" cx="220" cy="-12" r="5"/><circle class="post" cx="220" cy="212" r="5"/>
-    <text class="lab" x="220" y="-24">NET</text><text class="lab dim" x="220" y="244">13.4 m long, 6.1 m wide</text>
-    <circle class="us" cx="-8" cy="150" r="10"/><circle class="us" cx="-8" cy="50" r="10"/><circle class="them" cx="448" cy="46" r="10"/><circle class="them" cx="298" cy="152" r="10"/>
-    <g class="ov ov-rally"><path class="trail" d="M-6 150 L395 48 L446 42 L70 110 L20 118 L262 128"/>${dot(395, 48, 1)}${dot(70, 110, 2)}${dot(262, 128, 3)}
-      <circle class="ball" r="8" ${still ? 'cx="262" cy="128"' : ""}>${still ? "" : `<animateMotion dur="10s" repeatCount="indefinite" path="${rally}"/>`}</circle></g>
-    <g class="ov ov-serve"><path class="arrow" d="M4 147 L378 53" marker-end="url(#pbarr)"/><text class="lab big" x="365" y="84">IN</text><text class="lab big bad" x="255" y="28">✕</text></g>
-    <g class="ov ov-bounce"><path class="arrow" d="M4 147 L380 52" marker-end="url(#pbarr)"/><path class="arrow" d="M436 48 L86 108" marker-end="url(#pbarr)"/>${dot(395, 48, 1)}${dot(70, 110, 2)}</g>
-    <g class="ov ov-kitchen"><text class="lab big dark" transform="translate(191 100) rotate(-90)">NO VOLLEYS</text><text class="lab big dark" transform="translate(261 100) rotate(90)">NO VOLLEYS</text></g>
-    <g class="ov ov-score"><rect class="shade" x="-40" y="-46" width="520" height="304"/><text class="sc" x="118" y="118">4</text><text class="sc" x="220" y="118">2</text><text class="sc" x="322" y="118">1</text><text class="sc sep" x="169" y="112">-</text><text class="sc sep" x="271" y="112">-</text>
-      <text class="lab" x="118" y="160">US</text><text class="lab" x="220" y="160">THEM</text><text class="lab" x="322" y="160">SERVER</text></g>
-  </svg>`;
-  const steps = [
-    ["Pools by rating", `Each week, whoever turns up is ranked by rating and split into pools of eight or nine.`],
-    ["Everyone partners everyone", "In a pool of eight you play seven games, each with a different partner. No carrying, no hiding."],
-    ["Every game moves your rating", "Beat a stronger pair and you gain more. The score counts a little too."],
-    ["Next week reshuffles", "New ratings, new pools. Climb, and the company gets tougher."]
-  ];
+  const st = app.st, club = (window.LADDER_CONFIG || {}).club || {}, tot = st.ratings.totals || {}, out = st.ratings.games || {};
+  const games = id => (tot[id] ? tot[id].w + tot[id].l : 0);
+  const ranked = Object.keys(st.players).filter(id => st.players[id].active && games(id) > 0).sort((a, b) => rating(b) - rating(a) || nm(a).localeCompare(nm(b)));
+  const closed = closedSess(), last = closed[closed.length - 1];
+  const day = d => new Date(d + "T00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const played = closed.flatMap(s => Object.values(s.games).filter(g => g.status === "done" && g.s1 !== g.s2).map(g => ({ s, g })));
+  const close = played.filter(x => Math.abs(x.g.s1 - x.g.s2) <= 2).length;
+  /* the least likely win of the season: the winners' chance going in */
+  const upset = played.map(x => { const o = out[x.g.id], w1 = x.g.s1 > x.g.s2; return o ? { s: x.s, g: x.g, p: w1 ? o.p1 : 1 - o.p1, win: w1 ? x.g.t1 : x.g.t2, lose: w1 ? x.g.t2 : x.g.t1 } : null; })
+    .filter(Boolean).sort((a, b) => a.p - b.p)[0];
+  const pair = ids => ids.map(id => `<a class="plink" href="#/player/${id}">${esc(sn(id))}</a>`).join(" and ");
+  const head = (club.headline || ["Climb.", "Defend.", "Repeat."]).map((x, i, all) => `<span${i === all.length - 1 ? ' class="hot"' : ""}>${esc(x)}</span>`).join("");
+  const top = ranked[0], seed = id => st.players[id].seed;
+  const winners = last ? last.pools.map(p => ({ p, r: poolTable(last, p)[0] })).filter(x => x.r && x.r.w + x.r.l > 0) : [];
+  const champ = club.champion, same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  const champId = champ && (st.players[champ.id] ? champ.id : Object.keys(st.players).find(id => same(nm(id), champ.name)));
+  const go = `<div class="row s-go"><a class="btn primary" href="#/">Tonight's draw</a><a class="btn ghost" href="#/standings">The ladder</a></div>`;
   return `
-  <div class="pb" data-show="${show}">
-    <section class="pbhero">
-      <span class="pbkick">The game we are all here for</span>
-      <h1>Pickleball</h1>
-      <p class="pbtag">Tennis angles, table tennis hands, a badminton-sized court. Easy to start, very hard to stop.</p>
-      <div class="pbstats">
-        <div><b>6.1 × 13.4 m</b><span>the court: a badminton doubles court</span></div>
-        <div><b>86 cm</b><span>net height in the middle</span></div>
-        <div><b>26 to 40</b><span>holes in the ball</span></div>
-        <div><b>1965</b><span>invented near Seattle as a backyard game</span></div>
+  <div class="sell">
+    <section class="s-hero">
+      ${club.photo ? `<a class="s-photo" href="${esc(club.photo.src)}" target="_blank" rel="noopener" title="Open the photo"><img src="${esc(club.photo.src)}" alt="${esc(club.photo.alt || "")}" width="${club.photo.w || 1324}" height="${club.photo.h || 540}"></a>` : ""}
+      <div class="s-in${club.photo ? " over" : ""}">
+        ${club.logo ? `<img class="s-logo" src="${esc(club.logo.src)}" alt="${esc(club.logo.alt || "")}">` : ""}
+        <div class="s-words">
+          <span class="s-kick">${esc(club.kicker || st.league.name)}</span>
+          <h1>${head}</h1>
+          <p class="s-lede">${esc(club.pitch || "A competitive pickleball league.")}${ranked.length ? ` <b>${ranked.length} players. ${played.length} games so far. One ladder.</b>` : ""}</p>
+          ${go}
+        </div>
       </div>
     </section>
 
-    <h2 class="sub">The court, and the rules that make it pickleball</h2>
-    <section class="pbx">
-      <div class="pbstage">${court}</div>
-      <div class="pbside">
-        <div class="pbtabs" role="group" aria-label="What to show on the court">${PB.map(x => `<button class="pbtab" data-act="pbshow" data-k="${x[0]}" aria-pressed="${x[0] === show}">${x[1]}</button>`).join("")}</div>
-        ${PB.filter(x => x[0] === show).map(x => `<div class="pbcap" aria-live="polite"><h3>${x[2]}</h3><p>${x[3]}</p>${x[0] === "score" ? `<p class="pbnote">This league plays first to ${target}.</p>` : ""}</div>`).join("")}
-        <p class="pbkey"><i class="us"></i>serving pair<i class="them"></i>receiving pair<i class="bl"></i>ball</p>
+    ${champ ? `<a class="s-champ gold" ${champId ? `href="#/player/${champId}"` : ""}>
+      <span class="s-lab">${esc(champ.label || "Reigning champion")}</span><b class="s-name">${esc(champ.name)}</b>${champ.note ? `<span class="s-sub">${esc(champ.note)}</span>` : ""}
+      ${champ.rating ? `<span class="s-num num">${esc(champ.rating)}</span>` : ""}</a>` : ""}
+    ${top ? `<a class="s-champ" href="#/player/${top}">
+      <span class="s-lab">Top of the ladder now</span>
+      <b class="s-name">${esc(nm(top))}</b>
+      <span class="s-sub">${tot[top].w} wins from ${games(top)} games${rating(top) !== seed(top) ? ` · ${sgn(rating(top) - seed(top))} since the season started` : ""}</span>
+      <span class="s-num num">${fmt(rating(top))}</span>
+    </a>
+    ${ranked.length > 1 ? `<div class="s-pack"><span class="s-lab">The chasing pack</span>${ranked.slice(1, 6).map((id, i) => `<a href="#/player/${id}"><i>${i + 2}</i><b>${esc(nm(id))}</b><span class="num">${fmt(rating(id))}</span></a>`).join("")}</div>` : ""}` : ""}
+
+    ${winners.length ? `<section class="s-block">
+      <h2>Last ${esc(new Date(last.date + "T00:00").toLocaleDateString(undefined, { weekday: "long" }))}'s winners <small>${esc(day(last.date))}</small></h2>
+      <div class="s-wins">${winners.map(({ p, r }) => `<a class="s-win" href="#/player/${r.p}"><i class="s-badge">${esc(p.id)}</i><span class="s-lab">${esc(p.name)}</span><b>${esc(nm(r.p))}</b><span class="s-sub num">${r.w}-${r.l} · ${r.pf - r.pa >= 0 ? "+" : "−"}${Math.abs(r.pf - r.pa)} points</span></a>`).join("")}</div>
+    </section>` : ""}
+
+    ${played.length ? `<section class="s-block">
+      <h2>The season so far</h2>
+      <div class="s-stats">
+        <div><b class="num">${played.length}</b><span>games played over ${closed.length} night${closed.length > 1 ? "s" : ""}</span></div>
+        <div><b class="num">${close}</b><span>decided by two points or fewer</span></div>
+        ${upset ? `<div><b class="num">${Math.round(upset.p * 100)}%</b><span>the chance ${pair(upset.win)} had against ${pair(upset.lose)} on ${esc(day(upset.s.date))}. They won ${Math.max(upset.g.s1, upset.g.s2)}-${Math.min(upset.g.s1, upset.g.s2)}.</span></div>` : ""}
       </div>
-    </section>
+    </section>` : ""}
 
-    <h2 class="sub">Shots worth stealing</h2>
-    <section class="pbshots">${PB_SHOTS.map(x => `<div class="pbshot">${pbShot(x[2], x[3])}<h3>${x[0]}</h3><p>${x[1]}</p></div>`).join("")}</section>
-
-    <h2 class="sub">How this ladder works</h2>
-    <section class="pbsteps">${steps.map((x, i) => `<div class="pbstep"><b class="num">${i + 1}</b><h3>${x[0]}</h3><p>${x[1]}</p></div>`).join("")}</section>
-    <div class="row pbgo"><a class="btn primary" href="#/">Tonight's draw</a><a class="btn" href="#/standings">Standings</a></div>
+    <section class="s-end"><b>See you on court.</b>${go}</section>
   </div>`;
 }
 
@@ -259,7 +235,7 @@ function shell(body) {
   const link = (href, key, ico, label) => `<a href="${href}" ${route === key || (key === "standings" && route === "player") ? 'aria-current="page"' : ""}><span class="ico" aria-hidden="true">${ico}</span>${label}</a>`;
   return `
   <header class="top"><div class="top-in">
-    <div class="top-l"><a class="brand" href="#/pickleball" title="What is pickleball?">${esc(app.st.league.name)}</a>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
+    <div class="top-l"><a class="brand" href="#/pickleball" title="About the league">${esc(app.st.league.name)}</a>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
     <div class="top-c">${route === "board" && fsCan() ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}</div>
     <nav class="nav" aria-label="Main">
       ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${link("#/org", "org", "⚙", "Organiser")}
@@ -267,7 +243,7 @@ function shell(body) {
   </div></header>
   ${app.online ? "" : '<div class="offline">No connection. Scores will not save until it is back.</div>'}
   ${app.be.kind === "local" ? '<div class="demo">Single-device mode: everything is saved in this browser only.</div>' : ""}
-  <main class="${route === "board" ? "wide" : ""}">${body}</main>`;
+  <main class="${route === "board" ? "wide" : route === "pickleball" ? "bleed" : ""}">${body}</main>`;
 }
 const errLine = area => (app.err[area] ? `<p class="err" role="alert">${esc(app.err[area])}</p>` : "");
 /* One game as a scoreboard: a row per pair, names on the left, score on the right. */
@@ -1227,9 +1203,10 @@ function render() {
   const view = route === "court" ? viewCourt((a || "").toUpperCase()) : route === "board" ? viewBoard() : route === "standings" ? viewStandings() : route === "player" ? viewPlayer(a) : route === "org" ? viewOrg(a, b) : route === "pickleball" ? viewPickleball() : viewHome();
   const focused = document.activeElement && document.activeElement.id, selStart = focused && document.activeElement.selectionStart;
   const html = shell(view);
-  /* the pickleball page does not depend on scores: leave it alone when nothing in it changed, so its animation is not restarted */
-  if (!(route === "pickleball" && app.pbHtml === html && $("#app .pb"))) $("#app").innerHTML = html;
+  /* the front page: leave it alone when nothing in it changed, so the photo is not redrawn on every update */
+  if (!(route === "pickleball" && app.pbHtml === html && $("#app .sell"))) $("#app").innerHTML = html;
   app.pbHtml = route === "pickleball" ? html : null;
+  document.body.classList.toggle("on-sell", route === "pickleball");      // that page is dark from edge to edge
   $("#overlay").innerHTML = app.flow ? viewFlow() : app.dialog ? viewDialog() : "";
   const up = !!(app.flow || app.dialog);
   document.body.style.overflow = up ? "hidden" : "";
@@ -1288,7 +1265,6 @@ const A = {
   fullscreen: () => fsToggle(),
   toggleSkip: () => { app.showSkip = !app.showSkip; render(); },
   tab: d => { app.tab = d.tab; render(); },
-  pbshow: d => { app.pb = d.k; render(); },
   hl: d => togglePlayer(d.pid),
   hon: d => { location.hash = "#/player/" + d.pid; },
   player: d => { location.hash = "#/player/" + d.pid; },
