@@ -12,6 +12,7 @@ Per session, per pool: replay the rounds in every possible order and average the
 so a result is worth the same whenever in the night it was played.
 """
 import hashlib
+from decimal import Decimal, ROUND_HALF_UP
 import json
 import math
 import os
@@ -55,6 +56,12 @@ def _save_disk():
 
 def rnd(x):
     return math.floor(x + 0.5)
+
+
+def fixed(x, places):
+    """x to this many decimal places exactly as JavaScript's toFixed does it: the number's true value, halves away from zero.
+    (Python's own round() sends an exact half to the even neighbour, which put some per-game figures 0.01 off the site's.)"""
+    return float(Decimal(x).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)) + 0.0
 
 
 _M = 0xFFFFFFFF
@@ -249,8 +256,8 @@ def compute(state):
                 for gid, win, lose, ws, ls in rd:
                     prob, dw, dl = gmean[gid]
                     t1_won = sess["games"][gid]["s1"] > sess["games"][gid]["s2"]
-                    game_out[gid] = dict(p1=round(prob if t1_won else 1 - prob, 4),
-                                         d1=round(dw if t1_won else dl, 2), d2=round(dl if t1_won else dw, 2))
+                    game_out[gid] = dict(p1=fixed(prob if t1_won else 1 - prob, 4),
+                                         d1=fixed(dw if t1_won else dl, 2), d2=fixed(dl if t1_won else dw, 2))
                     for pid in win:
                         for d in (rec[pid], totals[pid]):
                             d["w"] += 1

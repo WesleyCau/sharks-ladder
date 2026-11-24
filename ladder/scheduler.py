@@ -1,7 +1,8 @@
 """Round-robin doubles schedules for one pool.
 
 8 players: the whist design. 7 rounds of 2 games; everyone partners everyone once and
-opposes everyone twice. Other sizes (4 to 12): a balanced schedule with even sit-outs,
+opposes everyone twice. 9 players: the whist design for nine, 9 rounds of 2 games with one
+player sitting out each round. Other sizes (4 to 12): a balanced schedule with even sit-outs,
 sized so each player gets as close to 7 games as an equal share allows.
 """
 import itertools
@@ -56,6 +57,14 @@ def _whist8():
     return None
 
 
+def _whist9():
+    """Whist design for 9 on a 3 x 3 grid: a starter round with player 0 sitting out, moved on by each step of the grid.
+    Everyone partners everyone once, opposes everyone twice and sits out once. Same design as whist9 in docs/core.js."""
+    add = lambda x, k: 3 * ((x // 3 + k // 3) % 3) + (x + k) % 3      # noqa: E731
+    starter = [((1, 2), (3, 6)), ((4, 8), (5, 7))]
+    return [[((add(a, k), add(b, k)), (add(c, k), add(d, k))) for (a, b), (c, d) in starter] for k in range(9)]
+
+
 def _balanced(n, n_rounds, rng):
     per_round = n // 4
     best = None
@@ -104,7 +113,7 @@ def generate(players, seed=0):
     if not MIN_POOL <= n <= MAX_POOL:
         raise ValueError("a pool needs %d to %d players, got %d" % (MIN_POOL, MAX_POOL, n))
     rng = random.Random("%s-%d" % (seed, n))
-    design = _whist8() if n == 8 else None
+    design = _whist8() if n == 8 else _whist9() if n == 9 else None
     if design is None:
         design = _balanced(n, round_count(n), rng)
     slots = list(players)

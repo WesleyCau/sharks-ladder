@@ -368,7 +368,8 @@ table.wk td { white-space: nowrap; }
 .editbtn::after { content: ""; position: absolute; inset: -8px -10px; }
 
 /* the bar between the pairs is a full-width tinted band that carries "vs Court 1" and, once scored, the Edit button */
-.board .bmatch { --midh: clamp(38px, 4vw, 50px); column-gap: 0; border-width: 2px; }
+/* --bz: how far All courts has been scaled down to fit a short screen (fillBoard). The band is sized back up so Confirm and Edit stay easy to tap. */
+.board .bmatch { --midh: max(clamp(38px, 4vw, 50px), calc(42px / var(--bz, 1))); column-gap: 0; border-width: 2px; }
 .board .names { font-size: min(clamp(22px, 3.3vw, 44px), var(--fit-name, 99px)); font-weight: 800; letter-spacing: -0.01em; line-height: 1.14; padding: calc(8px + var(--grow, 0px)) 6px calc(8px + var(--grow, 0px)) 11px; }      /* --grow: spare screen height shared out by fillBoard() */
 .board .names.lost { font-weight: 650; }
 .board .mid { background: var(--soft); padding-left: 11px; }
@@ -387,7 +388,7 @@ table.wk td { white-space: nowrap; }
 .board .pts { font-size: clamp(44px, 4.8vw, 62px); font-weight: 850; letter-spacing: -0.03em; }
 .board .enter { margin: 6px 6px 6px 0; border-radius: 12px; }
 .board .enter b { font-size: clamp(15px, 1.55vw, 21px); }
-.board .editbtn { border: 0; background: var(--chrome); color: var(--on-chrome); border-radius: 8px; padding: 3px 11px; font-size: clamp(12.5px, 1.3vw, 16px); font-weight: 750; }
+.board .editbtn { border: 0; background: var(--chrome); color: var(--on-chrome); border-radius: 8px; padding: 3px 11px; font-size: max(clamp(12.5px, 1.3vw, 16px), calc(13px / var(--bz, 1))); font-weight: 750; min-height: calc(30px / var(--bz, 1)); min-width: calc(46px / var(--bz, 1)); }
 @media (max-width: 899px) { .board .bmatch { --midh: 48px; } .board .editbtn { padding: 7px 12px; font-size: 13.5px; } }      /* a phone: a taller band, so Confirm and Edit are comfortable taps */
 
 .board .nextbox h2 { font-size: clamp(13px, 1.4vw, 16px); padding-bottom: 3px; }
@@ -456,6 +457,8 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .where2 { font-size: clamp(20px, 4.6vw, 28px); font-weight: 800; color: var(--brand-text); }
 a.note { display: block; text-decoration: none; font-weight: 650; }
 .sit.now { font-size: clamp(15px, 1.7vw, 20px); padding: 0 4px; }
+.board .sit.now { font-size: max(clamp(15px, 1.7vw, 20px), calc(16px / var(--bz, 1))); }      /* still readable when the board is scaled down */
+.board .sit.now b { font-size: calc(12px / var(--bz, 1)); }
 .oddlist { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 2px 14px; }
 .odd { display: grid; grid-template-columns: minmax(0, 1.1fr) auto minmax(0, 1.4fr); gap: 12px; align-items: baseline; padding: 10px 0; border-top: 1px solid var(--line); font-size: 18px; }
 .odd:first-child { border-top: 0; }
@@ -465,6 +468,7 @@ a.note { display: block; text-decoration: none; font-weight: 650; }
 .movebar .btn { min-height: 48px; }
 #toast { position: fixed; left: 50%; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 99px; font-weight: 650; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: calc(100vw - 32px); text-align: center; }
 #toast.show { opacity: 1; }
+#toast:empty { display: none; }      /* nothing to say yet: no pill fading out as the page loads */
 
 @media (min-width: 900px) {
   body { padding-bottom: 0; }
@@ -484,6 +488,11 @@ a.note { display: block; text-decoration: none; font-weight: 650; }
 /* ---------- the front page (behind the league name): the players, the club's logo, who is winning ---------- */
 /* Deep water from edge to edge in both themes. Aqua for what is happening now, the paddle's orange for the champion. */
 body.on-sell { background: #04101f; }
+/* a phone's bottom bar on the front page: dark like the page above it, not a white strip */
+@media (max-width: 899px) {
+  body.on-sell .nav { background: #04101f; border-top-color: rgba(255, 255, 255, .16); }
+  body.on-sell .nav a { color: #b9c9db; }
+}
 main.bleed { max-width: none; padding: 0; gap: 0; }
 .sell { --disp: "Avenir Next Condensed", "DIN Condensed", Impact, "Haettenschweiler", "Roboto Condensed", "Arial Narrow", sans-serif-condensed, system-ui, sans-serif;
   --s-ink: #ffffff; --s-ink2: #b9c8d8; --s-card: #0a1f36; --s-line: #17324f; --s-hot: #35c3f3; --s-deep: #04101f; --gut: clamp(16px, 4vw, 44px);

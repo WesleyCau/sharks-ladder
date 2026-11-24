@@ -186,6 +186,15 @@
     }
     return null;
   }
+  /* Nine players: the whist design on a 3 x 3 grid. One starter round with player 0 sitting out, moved on by each of the
+     nine steps of the grid. Everyone partners everyone once, opposes everyone twice and sits out once. */
+  let whist9Cache = null;
+  function whist9() {
+    if (whist9Cache) return whist9Cache;
+    const add = (x, k) => 3 * ((Math.floor(x / 3) + Math.floor(k / 3)) % 3) + (x + k) % 3;
+    const starter = [[[1, 2], [3, 6]], [[4, 8], [5, 7]]];
+    return (whist9Cache = Array.from({ length: 9 }, (_, k) => starter.map(([[a, b], [c, d]]) => [[add(a, k), add(b, k)], [add(c, k), add(d, k)]])));
+  }
   function balanced(n, nRounds, rand) {
     const perRound = Math.floor(n / 4);
     let best = null;
@@ -226,7 +235,7 @@
     const n = players.length;
     if (n < MIN_POOL || n > MAX_POOL) throw new Error(`a pool needs ${MIN_POOL} to ${MAX_POOL} players, got ${n}`);
     const rand = rng(String(seed) + "-" + n);
-    const design = (n === 8 && whist8()) || balanced(n, roundCount(n), rand);
+    const design = (n === 8 && whist8()) || (n === 9 && whist9()) || balanced(n, roundCount(n), rand);
     const slots = shuffle(players.slice(), rand), order = shuffle(design.slice(), rand);
     return order.map(rd => rd.map(([[a, b], [c, d]]) => [[slots[a], slots[b]], [slots[c], slots[d]]]));
   }
@@ -306,6 +315,7 @@
   function removeFromSession(s, pid) {
     s.attending = s.attending.filter(p => p !== pid);
     for (const pool of s.pools) if (pool.players.includes(pid)) { pool.players = pool.players.filter(p => p !== pid); clearSchedule(s); }
+    autoCourts(s);
   }
 
   H["league.update"] = (st, a) => {
@@ -375,28 +385,36 @@
     else { s.attending = []; s.pools = []; s.games = {}; }
   };
   /* How many pools for n players. Pools of eight or nine are the aim (two courts, 7 or 9 rounds):
-     as few pools as keep every pool at nine or under; if that leaves a pool under eight, one pool fewer (tens and elevens). */
+     as few pools as keep every pool at nine or under; if that leaves a pool under eight, one pool fewer (tens and elevens,
+     and for 23 players an eleven and a twelve). A pool under eight plays one game at a time and takes twice as long,
+     so it is only used when there is no other way: 13, 14 or 15 players. */
   function poolCount(n) {
     let k = Math.max(1, Math.ceil(n / 9));
-    if (k > 1 && Math.floor(n / k) < 8 && Math.ceil(n / (k - 1)) <= 11) k--;
+    if (k > 1 && Math.floor(n / k) < 8 && Math.ceil(n / (k - 1)) <= MAX_POOL) k--;
     return k;
   }
   /* Game targets a pool can play to: 11, 15 and 21, never shorter than the league's own setting. */
   const targetChoices = base => [...new Set(TARGETS.concat(base))].filter(t => t >= base).sort((a, b) => a - b);
   /* The target that brings a pool of n home at about the same time as the others. A night is as long as its longest pool
      playing to the league's setting (rounds x points); a pool with fewer rounds plays longer games to fill that time,
-     to within 10%. Eights and nines together: the nines play 9 rounds to 11 (99), the eights 7 rounds to 15 (105). */
+     to within 10%. Eights and nines together: the nines play 9 rounds to 11 (99), the eights 7 rounds to 15 (105).
+     A pool under eight plays one game at a time over many rounds: it runs long whatever anyone else does, so it does not
+     set the pace (otherwise one pool of seven would send every eight to 21). */
   function autoTarget(sizes, n, base) {
     const ok = k => k >= MIN_POOL && k <= MAX_POOL;
     if (!ok(n)) return base;
-    const budget = Math.max(...sizes.filter(ok).map(roundCount)) * base * 1.1;
+    const full = sizes.filter(k => ok(k) && k >= 8), pace = full.length ? full : sizes.filter(ok);
+    const budget = Math.max(...pace.map(roundCount)) * base * 1.1;
     return targetChoices(base).filter(t => roundCount(n) * t <= budget).pop() || base;
   }
-  /* What a pool plays to: the organiser's choice, else (before the start) the automatic one, else what the session started with. */
-  const poolTarget = (st, s, pool) => pool.target || (s.status === "setup" ? autoTarget(s.pools.map(p => p.players.length), pool.players.length, st.league.pointsToWin) : s.pointsToWin || st.league.pointsToWin);
-  const gameTarget = (st, s, gid) => { const g = s.games && s.games[gid], pool = g && s.pools.find(p => p.id === g.pool); return (pool && pool.target) || s.pointsToWin || st.league.pointsToWin; };
+  /* What a pool plays to: the organiser's choice, else (before the start) the automatic one, else what the session started with.
+     A session that recorded neither (an imported season) was played to 11, which is also what its ratings assume:
+     changing the league setting later must not change what an old game could have finished on. */
+  const poolTarget = (st, s, pool) => pool.target || (s.status === "setup" ? autoTarget(s.pools.map(p => p.players.length), pool.players.length, st.league.pointsToWin) : s.pointsToWin || BONUS_BASE);
+  const gameTarget = (st, s, gid) => { const g = s.games && s.games[gid], pool = g && s.pools.find(p => p.id === g.pool); return (pool && pool.target) || s.pointsToWin || BONUS_BASE; };
   /* Courts a pool of this size plays on: two games a round from eight players up, three for twelve. */
   const courtsFor = count => (count >= 12 ? 3 : count >= 8 ? 2 : 1);
+  const autoCourts = s => s.pools.forEach(p => { if (!p.courtsHand) p.courts = courtsFor(p.players.length); });
   H["session.assign"] = (st, a) => {
     const s = getSession(st, a.sid, "setup"), ranked = s.attending.slice().sort(byRating(st)), n = ranked.length;
     if (n < MIN_POOL) fail("few", `At least ${MIN_POOL} players are needed.`);
@@ -419,6 +437,7 @@
     if (a.to && a.to !== "none") target = s.pools.find(p => p.id === a.to) || fail("missing", "Pool not found.");
     s.pools.forEach(p => { p.players = p.players.filter(x => x !== a.pid); });
     if (target) { target.players.push(a.pid); target.players.sort(byRating(st)); }
+    autoCourts(s);
     clearSchedule(s);
   };
   H["session.pool"] = (st, a) => {
@@ -430,7 +449,7 @@
       if (pool.players.length || pool !== s2.pools[s2.pools.length - 1]) fail("invalid", "Only the last pool can be removed, and only when it is empty.");
       s2.pools.pop(); return;
     }
-    if ("courts" in a) { const c = parseInt(a.courts, 10); if (!(c >= 1 && c <= 3)) fail("invalid", "A pool can use 1 to 3 courts."); pool.courts = c; }
+    if ("courts" in a) { const c = parseInt(a.courts, 10); if (!(c >= 1 && c <= 3)) fail("invalid", "A pool can use 1 to 3 courts."); pool.courts = c; if (c === courtsFor(pool.players.length)) delete pool.courtsHand; else pool.courtsHand = true; }
     if ("target" in a) {
       getSession(st, a.sid, "setup");                                   // the target is fixed once the session has started
       if (a.target === "auto" || a.target === null) { delete pool.target; delete pool.autoTarget; return; }
@@ -468,6 +487,7 @@
   /* Back to a fresh start for the same draw: no scores, every pool on round 1. */
   H["session.reset"] = (st, a) => {
     const s = getSession(st, a.sid, "live");
+    if (s.wasClosed) fail("reopened", "This session was finished once and then reopened, so it cannot be reset. Correct its scores, or delete it.");
     for (const g of Object.values(s.games)) { g.s1 = null; g.s2 = null; g.status = "pending"; delete g.at; delete g.auto; }
     s.pools.forEach(p => { p.confirmed = 0; });
     return { games: Object.keys(s.games).length };
@@ -562,6 +582,7 @@
     const closed = st.sessions.filter(x => x.status === "closed").sort((x, y) => (x.date + "|" + x.id < y.date + "|" + y.id ? -1 : 1));
     if (closed[closed.length - 1] !== s) fail("order", "Only the most recent session can be reopened.");
     s.status = "live";
+    s.wasClosed = true;                                                  // an imported session never passed through Finish here
     Object.values(s.games).forEach(g => { if (g.status === "skipped" && g.auto) { g.status = "pending"; delete g.auto; } });   // games marked not played by hand stay that way
     recompute(st);
   };

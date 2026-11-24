@@ -4,6 +4,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -63,6 +65,18 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual((s["partner_min"], s["partner_max"]), (1, 1))
         self.assertEqual((s["oppose_min"], s["oppose_max"]), (2, 2))
         self.assertEqual((s["each_min"], s["each_max"]), (7, 7))
+
+    def test_nine_is_full_whist(self):
+        players = ["p%d" % i for i in range(9)]
+        for seed in ("x", "s8A", "s7C"):
+            rounds = scheduler.generate(players, seed=seed)
+            s = scheduler.summary(players, rounds)
+            self.assertEqual((s["rounds"], s["games"]), (9, 18))
+            self.assertEqual((s["partner_min"], s["partner_max"]), (1, 1))
+            self.assertEqual((s["oppose_min"], s["oppose_max"]), (2, 2))
+            sat = [[p for p in players if not any(p in t1 + t2 for t1, t2 in rd)] for rd in rounds]
+            self.assertTrue(all(len(x) == 1 for x in sat))
+            self.assertEqual(len({x[0] for x in sat}), 9)
 
     def test_other_sizes_are_valid_and_even(self):
         for n in range(4, 13):
@@ -164,7 +178,7 @@ class StoreTest(unittest.TestCase):
         with self.assertRaises(ActionError):
             st.apply("session.close", dict(sid=sid), org=False)
         st.apply("session.close", dict(sid=sid), org=True)
-        after = st.state["ratings"]["current"]
+        after = dict(st.state["ratings"]["current"])      # a copy: the store now updates its state in place
         self.assertEqual(sess["status"], "closed")
         self.assertTrue(all(after[p] != before[p] for p in pool_a["players"]))
         self.assertEqual(after[sess["pools"][1]["players"][0]], before[sess["pools"][1]["players"][0]])  # no games, no change
@@ -315,6 +329,9 @@ class StoreTest(unittest.TestCase):
         self.assertEqual([auto_target([8, 8, 9, 9], n, 11) for n in (8, 9)], [15, 11])
         self.assertEqual(auto_target([8, 8, 8], 8, 11), 11)
         self.assertEqual([auto_target([8, 9], n, 15) for n in (8, 9)], [21, 15])
+        self.assertEqual([auto_target([7, 8, 8], n, 11) for n in (7, 8)], [11, 11])      # a seven does not set the pace
+        self.assertEqual([auto_target([7, 8, 9, 9], n, 11) for n in (7, 8, 9)], [11, 15, 11])
+        self.assertEqual([auto_target([11, 12], n, 11) for n in (11, 12)], [11, 15])
         self.assertEqual(engine.scaled(11, 7, 11), (11, 7))
         self.assertEqual(engine.scaled(21, 20, 21), (11, 10))       # winners +1, losers +10: the same as 11-10
         self.assertEqual(engine.scaled(15, 0, 15), (11, 0))
@@ -346,9 +363,94 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(gain[2], gain[3])
         self.assertIn(gain[0] + gain[2], (11, 12))       # winners' 1 + losers' 10, the result itself cancels (or 0.001 on a half)
 
+    def test_old_sessions_keep_their_cap_and_reopened_cannot_reset(self):
+        st = self.store
+        first = min(st.state["sessions"], key=lambda s: (s["date"], s["id"]))
+        gid = next(iter(first["games"]))
+        st.apply("league.update", dict(pointsToWin=15), org=True)
+        with self.assertRaises(ActionError) as cm:      # Season 7 was to 11, whatever the league setting says now
+            st.apply("game.score", dict(sid=first["id"], gid=gid, s1=15, s2=4, history=True, replace=True), org=True)
+        self.assertEqual(cm.exception.code, "invalid")
+        last = max(st.state["sessions"], key=lambda s: (s["date"], s["id"]))
+        done = sum(1 for g in last["games"].values() if g["status"] == "done")
+        st.apply("session.reopen", dict(sid=last["id"]), org=True)
+        self.assertEqual((last["status"], last.get("wasClosed")), ("live", True))
+        with self.assertRaises(ActionError) as cm:
+            st.apply("session.reset", dict(sid=last["id"]), org=True)
+        self.assertEqual(cm.exception.code, "reopened")
+        self.assertEqual(sum(1 for g in last["games"].values() if g["status"] == "done"), done)
+
+    def test_courts_follow_pool_size(self):
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-27"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.assign", dict(sid=sid), org=True)
+        pool = sess["pools"][0]
+        n, mover = len(pool["players"]), pool["players"][-1]
+        self.assertEqual(pool["courts"], 2)
+        for pid in pool["players"][7:]:      # down to seven: one game at a time
+            st.apply("session.move", dict(sid=sid, pid=pid, to="none"), org=True)
+        self.assertEqual((len(pool["players"]), pool["courts"]), (7, 1))
+        st.apply("session.move", dict(sid=sid, pid=mover, to=pool["id"]), org=True)
+        self.assertEqual((len(pool["players"]), pool["courts"]), (8, 2))
+        st.apply("session.pool", dict(sid=sid, pool=pool["id"], courts=1), org=True)      # set by hand: it stays
+        st.apply("session.move", dict(sid=sid, pid=mover, to="none"), org=True)
+        st.apply("session.move", dict(sid=sid, pid=mover, to=pool["id"]), org=True)
+        self.assertEqual((pool["courts"], pool.get("courtsHand")), (1, True))
+        self.assertGreaterEqual(n, 8)
+
+    def test_per_game_figures_round_as_the_site_does(self):
+        from ladder import engine
+        self.assertEqual(engine.fixed(28.125, 2), 28.13)        # an exact half goes away from zero, as toFixed does
+        self.assertEqual(engine.fixed(-17.125, 2), -17.13)
+        self.assertEqual(engine.fixed(0.12345, 4), 0.1235)      # 0.12345 is stored a shade above the half
+        self.assertEqual(str(engine.fixed(-0.001, 2)), "0.0")
+
+    def test_finish_does_not_hold_up_other_devices(self):
+        """While the ratings are worked out a phone can still read the league and save a score, and that score counts."""
+        from ladder import engine
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-27"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.assign", dict(sid=sid), org=True)
+        st.apply("session.start", dict(sid=sid), org=True)
+        gids = sess["pools"][0]["rounds"][0]
+        st.apply("game.score", dict(sid=sid, gid=gids[0], s1=11, s2=5), org=False)
+        real, started, out = engine.compute, threading.Event(), {}
+
+        def slow(state):
+            started.set()
+            time.sleep(1.0)
+            return real(state)
+
+        def finish():
+            try:
+                out["result"] = st.apply("session.close", dict(sid=sid), org=True)
+            except Exception as e:      # reported by the assertions below
+                out["error"] = e
+
+        engine.compute = slow
+        try:
+            t = threading.Thread(target=finish)
+            t.start()
+            self.assertTrue(started.wait(10))
+            t0 = time.time()
+            with st.lock:                                    # a phone asking for the league
+                self.assertEqual(sess["status"], "live")     # not finished until the ratings are ready
+            st.apply("game.score", dict(sid=sid, gid=gids[1], s1=11, s2=9), org=False)      # a score a moment after Finish was tapped
+            self.assertLess(time.time() - t0, 0.7)
+            t.join(30)
+        finally:
+            engine.compute = real
+        self.assertNotIn("error", out)
+        self.assertEqual(sess["status"], "closed")
+        self.assertEqual(sess["games"][gids[1]]["status"], "done")
+        self.assertIn(gids[1], st.state["ratings"]["games"])
+        self.assertIn(sid, st.state["ratings"]["sessions"])
+
     def test_pool_count(self):
         from ladder.store import pool_count
-        want = {8: 1, 9: 1, 16: 2, 18: 2, 20: 2, 23: 3, 24: 3, 25: 3, 27: 3, 28: 3, 31: 3, 32: 4, 33: 4, 34: 4, 36: 4, 37: 4, 39: 4, 40: 5, 45: 5, 48: 6}
+        want = {8: 1, 9: 1, 11: 1, 12: 1, 13: 2, 15: 2, 16: 2, 18: 2, 20: 2, 22: 2, 23: 2, 24: 3, 25: 3, 27: 3, 28: 3, 31: 3, 32: 4, 33: 4, 34: 4, 36: 4, 37: 4, 39: 4, 40: 5, 45: 5, 48: 6}
         self.assertEqual({n: pool_count(n) for n in want}, want)
 
 

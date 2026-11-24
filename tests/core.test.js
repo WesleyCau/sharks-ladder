@@ -17,6 +17,17 @@ test("8 players get the full whist design", () => {
   assert.deepStrictEqual([s.rounds, s.games, s.partnerMin, s.partnerMax, s.opposeMin, s.opposeMax, s.eachMin, s.eachMax], [7, 14, 1, 1, 2, 2, 7, 7]);
 });
 
+test("9 players get the whist design for nine: partners once, opponents twice, one sit-out each", () => {
+  const players = Array.from({ length: 9 }, (_, i) => "p" + i);
+  for (const seed of ["x", "s8A", "s7C"]) {
+    const rounds = L.generate(players, seed), s = L.summary(players, rounds);
+    assert.deepStrictEqual([s.rounds, s.games, s.partnerMin, s.partnerMax, s.opposeMin, s.opposeMax, s.eachMin, s.eachMax], [9, 18, 1, 1, 2, 2, 8, 8]);
+    const sat = rounds.map(rd => players.filter(p => !rd.flat(2).includes(p)));
+    assert.ok(sat.every(x => x.length === 1));
+    assert.strictEqual(new Set(sat.flat()).size, 9);
+  }
+});
+
 test("pools of 4 to 12 are valid and even", () => {
   for (let n = 4; n <= 12; n++) {
     const players = Array.from({ length: n }, (_, i) => "p" + i), rounds = L.generate(players, "y");
@@ -235,14 +246,16 @@ test("the sampled order average is the published one (same numbers as the Python
   assert.deepStrictEqual(got, JSON.parse(fs.readFileSync(file, "utf8")).ends);
 });
 
-test("pool count: eights and nines where they fit, tens and elevens before sevens", () => {
-  const want = { 8: 1, 9: 1, 16: 2, 18: 2, 20: 2, 23: 3, 24: 3, 25: 3, 27: 3, 28: 3, 31: 3, 32: 4, 33: 4, 34: 4, 36: 4, 37: 4, 39: 4, 40: 5, 45: 5, 48: 6 };
+test("pool count: eights and nines where they fit, tens to twelves before sevens", () => {
+  const want = { 8: 1, 9: 1, 11: 1, 12: 1, 13: 2, 15: 2, 16: 2, 18: 2, 20: 2, 22: 2, 23: 2, 24: 3, 25: 3, 27: 3, 28: 3, 31: 3, 32: 4, 33: 4, 34: 4, 36: 4, 37: 4, 39: 4, 40: 5, 45: 5, 48: 6 };
   for (const n in want) assert.strictEqual(L.poolCount(+n), want[n], "n=" + n);
   const sizes = n => { const st = league(n), sid = L.apply(st, "session.create", { date: "2026-11-27" }, true).id; L.apply(st, "session.assign", { sid }, true); return st.sessions[0].pools.map(p => p.players.length).join(","); };
   assert.strictEqual(sizes(36), "9,9,9,9");
   assert.strictEqual(sizes(34), "8,8,9,9");
   assert.strictEqual(sizes(25), "8,8,9");
   assert.strictEqual(sizes(33), "8,8,8,9");
+  assert.strictEqual(sizes(23), "11,12");            // not 7, 8, 8: a seven plays one game at a time and takes twice as long
+  assert.strictEqual(sizes(28), "9,9,10");
 });
 
 test("game target per pool: automatic by pool size, set by hand, fixed at the start, score cap", () => {
@@ -254,6 +267,12 @@ test("game target per pool: automatic by pool size, set by hand, fixed at the st
   assert.strictEqual(L.autoTarget([10, 9, 9], 9, 11), 11);
   assert.strictEqual(L.autoTarget([8, 9], 8, 15), 21);              // a longer night: 147 beside 135
   assert.strictEqual(L.autoTarget([8, 9], 9, 15), 15);
+  /* a pool under eight (one game at a time, many rounds) does not set the pace: one seven must not send the eights to 21 */
+  assert.deepStrictEqual([7, 8].map(n => L.autoTarget([7, 8, 8], n, 11)), [11, 11]);
+  assert.deepStrictEqual([7, 8, 9].map(n => L.autoTarget([7, 8, 9, 9], n, 11)), [11, 15, 11]);
+  assert.deepStrictEqual([6, 7].map(n => L.autoTarget([6, 7], n, 11)), [11, 11]);
+  assert.strictEqual(L.autoTarget([4, 9, 9], 4, 11), 15);           // a four plays 7 rounds like an eight
+  assert.deepStrictEqual([11, 12].map(n => L.autoTarget([11, 12], n, 11)), [11, 15]);
   const st = league(34), sid = L.apply(st, "session.create", { date: "2026-11-27" }, true).id, sess = st.sessions[0];
   L.apply(st, "session.assign", { sid }, true);
   assert.deepStrictEqual(sess.pools.map(p => p.players.length), [8, 8, 9, 9]);
@@ -304,6 +323,37 @@ test("same as last week: attendance copied from the last finished session", () =
   assert.deepStrictEqual(next.attending.slice().sort(), ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]);
   assert.ok(next.pools.every(p => p.players.every(pid => next.attending.includes(pid))));       // nobody left in a pool who is not playing
   throwsCode(() => L.apply(st, "session.attendAll", { sid: sid2, last: true }, false), "pin");
+});
+
+test("old sessions keep their cap; a reopened session cannot be reset; courts follow the pool's size", () => {
+  const st = league(17), sid = L.apply(st, "session.create", { date: "2026-11-27" }, true).id, sess = st.sessions[0];
+  L.apply(st, "session.assign", { sid }, true);
+  assert.deepStrictEqual(sess.pools.map(p => [p.players.length, p.courts]), [[8, 2], [9, 2]]);
+  const mover = sess.pools[0].players[7];
+  L.apply(st, "session.move", { sid, pid: mover, to: "none" }, true);
+  assert.deepStrictEqual(sess.pools.map(p => [p.players.length, p.courts]), [[7, 1], [9, 2]]);      // a seven plays one game at a time
+  L.apply(st, "session.move", { sid, pid: mover, to: "A" }, true);
+  assert.strictEqual(sess.pools[0].courts, 2);
+  L.apply(st, "session.pool", { sid, pool: "A", courts: 1 }, true);                                // set by hand: it stays
+  L.apply(st, "session.move", { sid, pid: mover, to: "none" }, true);
+  L.apply(st, "session.move", { sid, pid: mover, to: "A" }, true);
+  assert.deepStrictEqual([sess.pools[0].courts, sess.pools[0].courtsHand], [1, true]);
+  L.apply(st, "session.pool", { sid, pool: "A", courts: 2 }, true);                                // back to what the size gives
+  assert.strictEqual(sess.pools[0].courtsHand, undefined);
+  L.apply(st, "session.start", { sid }, true);
+  const gid = sess.pools[1].rounds[0][0];
+  L.apply(st, "game.score", { sid, gid, s1: 11, s2: 6 }, false);
+  L.apply(st, "session.close", { sid }, true);
+  /* as an imported season is stored: no target recorded anywhere. It was played to 11, and stays that way */
+  delete sess.pointsToWin; delete sess.wasClosed; sess.pools.forEach(p => { delete p.target; delete p.autoTarget; });
+  L.apply(st, "league.update", { pointsToWin: 15 }, true);
+  assert.strictEqual(L.gameTarget(st, sess, gid), 11);
+  assert.strictEqual(L.poolTarget(st, sess, sess.pools[1]), 11);
+  throwsCode(() => L.apply(st, "game.score", { sid, gid, s1: 15, s2: 4, history: true, replace: true }, true), "invalid");
+  L.apply(st, "session.reopen", { sid }, true);
+  assert.strictEqual(sess.wasClosed, true);
+  throwsCode(() => L.apply(st, "session.reset", { sid }, true), "reopened");
+  assert.strictEqual(sess.games[gid].s1, 11);
 });
 
 console.log(`${passed} passed`);

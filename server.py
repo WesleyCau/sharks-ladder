@@ -80,8 +80,14 @@ class Handler(BaseHTTPRequestHandler):
                 if have == str(STORE.state["version"]):
                     return self._send(204)
                 return self._json(200, self._state())
-        if url.path == "/config.js":      # the local server never uses the hosted site's Firebase settings
-            body = "window.LADDER_CONFIG = { firebase: null, openOrganiser: %s };" % ("true" if OPEN else "false")
+        if url.path == "/config.js":
+            # the site's own config (the club's front page), but never the hosted site's database: this server keeps the data
+            try:
+                with open(os.path.join(STATIC, "config.js"), encoding="utf-8") as f:
+                    body = f.read()
+            except OSError:
+                body = ""
+            body += "\nwindow.LADDER_CONFIG = Object.assign({}, window.LADDER_CONFIG, { firebase: null, openOrganiser: %s });\n" % ("true" if OPEN else "false")
             return self._send(200, body.encode("utf-8"), "text/javascript; charset=utf-8")
         rel = "index.html" if url.path in ("/", "") else url.path.lstrip("/")
         full = os.path.normpath(os.path.join(STATIC, rel))

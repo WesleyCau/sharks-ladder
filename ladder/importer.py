@@ -35,7 +35,7 @@ def build(source=SOURCE, name="Southern Sharks PC Season 7"):
             starts.setdefault(w["court"], []).append(float(w["start"]))
         courts = sorted(starts, key=lambda c: -sum(starts[c]) / len(starts[c]))
         state["seq"]["s"] += 1
-        sess = dict(id="s%d" % state["seq"]["s"], date=date, status="closed", attending=[ids[w["player"]] for w in wk], pools=[], games={})
+        sess = dict(id="s%d" % state["seq"]["s"], date=date, status="closed", pointsToWin=11, attending=[ids[w["player"]] for w in wk], pools=[], games={})      # Season 7 was first to 11 throughout
         for i, court in enumerate(courts):
             members = sorted((w for w in wk if w["court"] == court), key=lambda w: -float(w["start"]))
             pool = dict(id=chr(65 + i), name="Pool " + chr(65 + i), courts=2, players=[ids[w["player"]] for w in members], rounds=[])

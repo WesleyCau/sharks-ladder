@@ -4,9 +4,9 @@ A prototype for running the Southern Sharks PC doubles ladder next season: roste
 
 It is a separate site from the Adelaide ladder manager it grew out of: its own code, its own data, its own colours.
 
-- **Pools:** players attending are ranked by 4DR and split into pools of eight or nine, two courts each. 36 players is four pools of nine; 34 is 8, 8, 9, 9; 28 to 31 use tens and elevens so that nobody lands in a pool of seven. The organiser can move anyone.
-- **Schedule:** a pool of eight plays 7 rounds, partnering everyone once and opposing everyone twice. A pool of nine plays 9 rounds with one player sitting out each round. Pools of 4 to 12 get an even schedule.
-- **Game length:** each pool plays first to 11, 15 or 21. Left on automatic, a pool with fewer rounds plays longer games so the pools finish together: on a night of eights and nines the nines play 9 rounds to 11 (99 points) and the eights 7 rounds to 15 (105). The organiser can set any pool by hand before the start. The score bonus is scaled to a game to 11, so a longer game is worth the same.
+- **Pools:** players attending are ranked by 4DR and split into pools of eight or nine, two courts each. 36 players is four pools of nine; 34 is 8, 8, 9, 9; 28 to 31 use tens and elevens, and 23 is an eleven and a twelve, so that nobody lands in a pool of seven (a seven plays one game at a time and takes twice as long; only 13, 14 or 15 players force one). The organiser can move anyone, and a pool's courts follow its size unless set by hand.
+- **Schedule:** a pool of eight plays 7 rounds, partnering everyone once and opposing everyone twice. A pool of nine plays 9 rounds, also partnering everyone once and opposing everyone twice, with each player sitting out one round. Other sizes from 4 to 12 get a balanced schedule with even sit-outs.
+- **Game length:** each pool plays first to 11, 15 or 21. Left on automatic, a pool with fewer rounds plays longer games so the pools finish together: on a night of eights and nines the nines play 9 rounds to 11 (99 points) and the eights 7 rounds to 15 (105). A pool under eight does not set the pace for the others. The organiser can set any pool by hand before the start, and is warned when a pool will run more than a quarter longer than the rest. The score bonus is scaled to a game to 11, so a longer game is worth the same. A session with no target recorded (the imported Season 7) is treated as first to 11 whatever the league setting is changed to later.
 - **Scores:** tap the winning pair, tap the losing score, save. Any phone or tablet can enter a score while a session is live.
 - **4DR:** the club's per-game formula. Win chance from the gap between the two pairs' average 4DR, up to 0.100 for the result, plus the score bonus (winners +(W-L)/1000, losers +L/1000).
 
@@ -44,7 +44,7 @@ To switch the login on: enable **Authentication > Email/Password** in Firebase, 
 python server.py
 ```
 
-Needs Python 3.10 or later and nothing else. It prints the address for other devices (port 8082) and creates `data/config.json` on first run. The organiser PIN in that file is not asked for unless you add `"open": false` to it. The first start after loading a season takes about 20 seconds while it works through the pools of nine; the results are kept in `data/ratings-cache.json`, so later starts are immediate.
+Needs Python 3.10 or later and nothing else. It prints the address for other devices (port 8082) and creates `data/config.json` on first run. The organiser PIN in that file is not asked for unless you add `"open": false` to it. The first start after loading a season takes about 20 seconds while it works through the pools of nine; the results are kept in `data/ratings-cache.json`, so later starts are immediate. Finishing a session or correcting an old score works the ratings out with the league unlocked (about 10 seconds for four pools of nine), so other devices keep reading and scoring meanwhile, and a score that lands in that time is counted.
 
 ## Season 7 data
 

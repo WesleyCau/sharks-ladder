@@ -77,7 +77,7 @@ const Backends = (() => {
     let state = Ladder.emptyState(), admins = {}, user = null, loaded = false, connected = true;
     const OFFLINE = { ok: false, code: "offline", message: "No connection, so that has not been saved. Try again when the connection is back." };
     const SLOW = { ok: false, code: "offline", message: "No reply from the database yet. Check the connection, then check the score before entering it again." };
-    const timed = p => Promise.race([p, new Promise(r => setTimeout(() => r(Object.assign({}, SLOW)), 12000))]);
+    const timed = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(Object.assign({}, SLOW)), ms))]);
     const open = !!(window.LADDER_CONFIG || {}).openOrganiser;      // no login: the database rules must allow it too
     const isOrg = () => open || !!(user && admins[user.uid]);
     const emit = () => { if (loaded) onState({ state, urls: [] }); };
@@ -145,8 +145,13 @@ const Backends = (() => {
         db.onValue(db.ref(database, ".info/connected"), s => { connected = !!s.val(); if (loaded) onOnline(connected); });
         au.onAuthStateChanged(auth, u => { user = u; emit(); });
       },
-      /* Offline, a database write would sit waiting for ever: say so at once, and give up waiting after 12 seconds. */
-      send(type, args) { return connected ? timed(this.sendNow(type, args)) : Promise.resolve(Object.assign({}, OFFLINE)); },
+      /* Offline, a database write would sit waiting for ever: say so at once, and give up waiting after 12 seconds.
+         Anything that re-rates the league (finishing, reopening, correcting an old score) gets 90: this device works the
+         ratings out itself, and on a phone that alone can pass 12 seconds, which would report a failure that was not one. */
+      send(type, args) {
+        const heavy = type === "session.close" || type === "session.reopen" || !!(args && args.history);
+        return connected ? timed(this.sendNow(type, args), heavy ? 90000 : 12000) : Promise.resolve(Object.assign({}, OFFLINE));
+      },
       async sendNow(type, args) {
         if (type === "game.score" || type === "game.clear" || type === "round.confirm") {
           const sess = state.sessions.find(s => s.id === args.sid);
