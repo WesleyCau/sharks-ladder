@@ -44,6 +44,26 @@ async function test(name, fn) {
     for (const pid of ["p9", "p10", "p11"]) await ok("player.update", { id: pid, active: false });
   });
 
+  await test("availability: each answer is a write of its own, and the league code is filed out of sight", async () => {
+    await ok("season.set", { dates: ["2026-11-30", "2026-12-07"] });
+    assert.deepStrictEqual(db.read("league/season/dates"), ["2026-11-30", "2026-12-07"]);
+    db.write("availability/2026-11-30/p2", { v: "out", at: 1 }, true);       // another phone answers; this device has not heard
+    await ok("avail.set", { date: "2026-11-30", pid: "p1", v: "in" });
+    assert.strictEqual(db.read("availability/2026-11-30/p2/v"), "out");      // not written over
+    assert.strictEqual(db.read("availability/2026-11-30/p1/v"), "in");
+    assert.strictEqual((await be.send("avail.set", { date: "2026-11-23", pid: "p1", v: "in" })).code, "date");
+    await ok("avail.set", { date: "2026-11-30", pid: "p1", v: null });
+    assert.strictEqual(db.read("availability/2026-11-30/p1"), null);
+    for (let i = 1; i <= 8; i++) await ok("avail.set", { date: "2026-11-30", pid: "p" + i, v: "in" });
+    assert.strictEqual(Ladder.availCount(state, "2026-11-30").in.length, 8);
+    assert.strictEqual(be.joined(), false);
+    assert.ok((await be.join("the-code")).ok);
+    assert.strictEqual(be.joined(), true);
+    assert.strictEqual(db.read("members/anon1/k"), "the-code");
+    assert.strictEqual(state.members, undefined);                            // never part of what phones are sent
+    assert.strictEqual((await be.join("  ")).code, "code");
+  });
+
   await test("session set-up, scoring and a stale edit", async () => {
     sid = (await ok("session.create", { date: "2026-11-30" })).id;
     await ok("session.assign", { sid });
@@ -130,6 +150,17 @@ async function test(name, fn) {
     assert.ok(db.read(`ratings/sessions/${sid}`));
     const j = await be.send("game.score", { sid, gid: untouched, s1: 11, s2: 1 });
     assert.strictEqual(j.code, "closed");                                    // a score screen left open cannot write into a finished night
+  });
+
+  await test("each Finish saves the league in the database, to go back to", async () => {
+    const list = await be.copies();
+    assert.deepStrictEqual(list.map(x => [x.sid, x.date, x.players]), [[sid, "2026-11-30", Object.keys(db.read("players")).length]]);
+    const copy = await be.copy(sid);
+    assert.strictEqual(copy.sessions.find(s => s.id === sid).status, "closed");
+    assert.ok(copy.ratings.sessions[sid]);
+    assert.strictEqual("availability" in copy, false);                       // a restore leaves players' answers alone
+    assert.strictEqual(state.copies, undefined);
+    assert.strictEqual(await be.copy("s999"), null);
   });
 
   await test("offline is reported at once; reopen and delete clean up", async () => {

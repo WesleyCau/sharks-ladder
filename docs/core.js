@@ -252,14 +252,14 @@
 
   /* ---------------- league rules (actions on the state document) ---------------- */
   const DEFAULT_SEEDS = [3500, 3000, 2500];
-  const OPEN_ACTIONS = new Set(["game.score", "game.clear", "round.confirm"]);   // anyone, during a live session
+  const OPEN_ACTIONS = new Set(["game.score", "game.clear", "round.confirm", "avail.set"]);   // anyone: scores during a live session, and a player's own in or out
 
   function ActionError(code, message, extra) { this.code = code; this.message = message; this.extra = extra || {}; }
   const fail = (code, message, extra) => { throw new ActionError(code, message, extra); };
 
   function emptyState(name) {
     return { version: 1, seq: { p: 0, s: 0, g: 0 }, league: { name: name || "Southern Sharks PC Ladder League", seeds: DEFAULT_SEEDS.slice(), poolSize: 8, pointsToWin: 11, nameStyle: "short" },
-      players: {}, sessions: [], ratings: { current: {}, sessions: {}, games: {}, totals: {} } };
+      players: {}, sessions: [], availability: {}, ratings: { current: {}, sessions: {}, games: {}, totals: {} } };
   }
   const toArray = x => (Array.isArray(x) ? x.filter(v => v != null) : x && typeof x === "object" ? Object.keys(x).sort((a, b) => a - b).map(k => x[k]) : []);
   const idNum = id => parseInt(String(id).slice(1), 10) || 0;
@@ -270,6 +270,8 @@
     st.league = Object.assign(emptyState().league, st.league);
     st.league.seeds = toArray(st.league.seeds);
     st.players = st.players || {};
+    st.availability = st.availability || {};
+    if (st.league.season) st.league.season = Object.assign({}, st.league.season, { dates: toArray(st.league.season.dates) });
     st.sessions = toArray(st.sessions).sort((a, b) => idNum(a.id) - idNum(b.id)).map(s => {
       const games = {};
       for (const gid in s.games || {}) {
@@ -350,6 +352,50 @@
       recompute(st);
     }
   };
+  /* ---------------- the season's nights, and who has said they are playing ---------------- */
+  const isDate = d => /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d + "T00:00").getTime());
+  /* The league's calendar. Answers close `days` days before a night at `time`; names: whether players see who is in. */
+  const seasonOf = st => { const x = st.league.season || {}; return { dates: toArray(x.dates), days: x.days == null ? 1 : x.days, time: x.time || "18:00", names: x.names !== false }; };
+  /* In, out and no answer for one night, among the players still in the league. */
+  function availCount(st, date) {
+    const said = (st.availability || {})[date] || {}, out = { in: [], out: [], none: [] };
+    for (const pid in st.players) if (st.players[pid].active) out[said[pid] && said[pid].v === "in" ? "in" : said[pid] && said[pid].v === "out" ? "out" : "none"].push(pid);
+    return out;
+  }
+  /* One answer, checked. Shared with the hosted database, which writes each answer on its own so 40 phones never collide. */
+  function availCheck(st, a) {
+    const date = String(a.date || ""), p = st.players[a.pid];
+    if (!seasonOf(st).dates.includes(date)) fail("date", "That night is not in the league calendar.");
+    if (!p) fail("missing", "Player not found.");
+    if (!p.active) fail("inactive", `${p.name} is marked as dropped out. Ask the organiser.`);
+    if (a.v !== "in" && a.v !== "out" && a.v != null && a.v !== "") fail("invalid", "Choose in or out.");
+    return { date, pid: a.pid, v: a.v === "in" || a.v === "out" ? a.v : null };
+  }
+  H["avail.set"] = (st, a) => {
+    const { date, pid, v } = availCheck(st, a);
+    st.availability = st.availability || {};
+    const night = st.availability[date] = st.availability[date] || {};
+    if (v) night[pid] = { v, at: Date.now() }; else delete night[pid];
+  };
+  H["season.set"] = (st, a) => {
+    const cur = seasonOf(st), dates = "dates" in a ? [...new Set(toArray(a.dates).map(String))].sort() : cur.dates;
+    if (dates.some(d => !isDate(d))) fail("invalid", "One of those is not a date.");
+    if (dates.length > 60) fail("invalid", "A season can have at most 60 nights.");
+    const days = "days" in a ? parseInt(a.days, 10) : cur.days, time = "time" in a ? String(a.time) : cur.time;
+    if (!(days >= 0 && days <= 6)) fail("invalid", "Answers can close on the day or up to 6 days before.");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) fail("invalid", "Enter the closing time as hours and minutes, for example 18:00.");
+    st.league.season = { dates, days, time, names: "names" in a ? !!a.names : cur.names };
+    for (const d in st.availability || {}) if (!dates.includes(d)) delete st.availability[d];      // answers for a night taken off the calendar go with it
+  };
+  /* Setup only: make the session's attendance what players have said for that night. Pools keep everyone who is still in. */
+  H["session.useAvail"] = (st, a) => {
+    const s = getSession(st, a.sid, "setup"), want = availCount(st, s.date).in, keep = new Set(want);
+    let added = 0, removed = 0;
+    for (const pid of s.attending.slice()) if (!keep.has(pid)) { removeFromSession(s, pid); removed++; }
+    for (const pid of want) if (!s.attending.includes(pid)) { s.attending.push(pid); added++; }
+    return { added, removed };
+  };
+
   H["session.create"] = (st, a) => {
     if (openSession(st)) fail("open", "Finish the current session before creating another.");
     const date = String(a.date || "");
@@ -359,9 +405,11 @@
     if (closed.length && date < closed[closed.length - 1].date) fail("date", `That date is before the last finished session (${closed[closed.length - 1].date}). Pick that day or later.`);
     const active = Object.keys(st.players).filter(pid => st.players[pid].active);
     const last = closed.length ? new Set(closed[closed.length - 1].attending) : new Set(active);
-    const s = { id: nextId(st, "s"), date, status: "setup", attending: active.filter(p => last.has(p)), pools: [], games: {} };
+    /* once anyone has answered for that night, the session starts with the players who said they are in */
+    const said = (st.availability || {})[date] || {}, answered = Object.keys(said).length > 0;
+    const s = { id: nextId(st, "s"), date, status: "setup", attending: active.filter(p => (answered ? said[p] && said[p].v === "in" : last.has(p))), pools: [], games: {} };
     st.sessions.push(s);
-    return { id: s.id };
+    return { id: s.id, from: answered ? "availability" : "last" };
   };
   H["session.attend"] = (st, a) => {
     const s = getSession(st, a.sid, "setup"), p = getPlayer(st, a.pid);
@@ -597,6 +645,6 @@
     return result;
   }
 
-  Object.assign(L, { rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
+  Object.assign(L, { seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));

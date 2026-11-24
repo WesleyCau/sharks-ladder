@@ -356,4 +356,43 @@ test("old sessions keep their cap; a reopened session cannot be reset; courts fo
   assert.strictEqual(sess.games[gid].s1, 11);
 });
 
+test("availability: the season's nights, in and out, and a session that starts from the answers", () => {
+  const st = league(10), ids = Object.keys(st.players), night = "2026-11-27";
+  throwsCode(() => L.apply(st, "season.set", { dates: [night] }, false), "pin");
+  L.apply(st, "season.set", { dates: ["2026-12-04", night, night] }, true);
+  assert.deepStrictEqual(L.seasonOf(st), { dates: [night, "2026-12-04"], days: 1, time: "18:00", names: true });
+  ids.slice(0, 6).forEach(pid => L.apply(st, "avail.set", { date: night, pid, v: "in" }, false));      // players answer for themselves: no organiser needed
+  L.apply(st, "avail.set", { date: night, pid: ids[6], v: "out" }, false);
+  throwsCode(() => L.apply(st, "avail.set", { date: "2026-11-20", pid: ids[0], v: "in" }, false), "date");
+  throwsCode(() => L.apply(st, "avail.set", { date: night, pid: "nobody", v: "in" }, false), "missing");
+  throwsCode(() => L.apply(st, "avail.set", { date: night, pid: ids[0], v: "maybe" }, false), "invalid");
+  let c = L.availCount(st, night);
+  assert.deepStrictEqual([c.in.length, c.out.length, c.none.length], [6, 1, 3]);
+  L.apply(st, "avail.set", { date: night, pid: ids[0], v: null }, false);                             // an answer taken back
+  L.apply(st, "player.update", { id: ids[1], active: false }, true);                                  // dropped out of the league: not counted
+  throwsCode(() => L.apply(st, "avail.set", { date: night, pid: ids[1], v: "in" }, false), "inactive");
+  c = L.availCount(st, night);
+  assert.deepStrictEqual([c.in.length, c.out.length, c.none.length], [4, 1, 4]);
+
+  const made = L.apply(st, "session.create", { date: night }, true), sid = made.id, sess = st.sessions[0];
+  assert.strictEqual(made.from, "availability");
+  assert.deepStrictEqual(sess.attending, ids.slice(2, 6));
+  L.apply(st, "session.assign", { sid }, true);
+  L.apply(st, "avail.set", { date: night, pid: ids[7], v: "in" }, false);                             // a late yes and a late no
+  L.apply(st, "avail.set", { date: night, pid: ids[2], v: "out" }, false);
+  assert.deepStrictEqual(L.apply(st, "session.useAvail", { sid }, true), { added: 1, removed: 1 });
+  assert.deepStrictEqual(sess.attending.slice().sort(), [ids[3], ids[4], ids[5], ids[7]].sort());
+  assert.ok(!sess.pools.some(p => p.players.includes(ids[2])));
+
+  L.apply(st, "season.set", { dates: ["2026-12-04"], days: 0, time: "12:30", names: false }, true);
+  assert.strictEqual(st.availability[night], undefined);                                              // answers go with a night taken off the calendar
+  assert.deepStrictEqual(L.seasonOf(st), { dates: ["2026-12-04"], days: 0, time: "12:30", names: false });
+  throwsCode(() => L.apply(st, "season.set", { time: "6pm" }, true), "invalid");
+  assert.deepStrictEqual(L.seasonOf(L.normalize(JSON.parse(JSON.stringify(st)))).dates, ["2026-12-04"]);
+  /* a night nobody has answered for starts from last week, as before */
+  const plain = league(8);
+  assert.strictEqual(L.apply(plain, "session.create", { date: night }, true).from, "last");
+  assert.strictEqual(plain.sessions[0].attending.length, 8);
+});
+
 console.log(`${passed} passed`);

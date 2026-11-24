@@ -3,13 +3,14 @@
      firebase  shared live database (the hosted site, once config.js has the Firebase details)
      server    the Python server in this repo (laptop on the venue Wi-Fi)
      local     this browser only (demo and single-device use)
-   Interface: { kind, orgMode, isOrg(), start(), send(type, args), signIn(), signOut(), replaceAll(doc, { overLive }) } */
+   Interface: { kind, orgMode, isOrg(), start(), send(type, args), signIn(), signOut(), replaceAll(doc, { overLive }) }
+   Hosted only: join(code) shows the league code to the database, copies() and copy(sid) read the league as saved at each Finish. */
 const Backends = (() => {
   const clone = x => JSON.parse(JSON.stringify(x));
   function failure(e) {
     if (e instanceof Ladder.ActionError) return Object.assign({ ok: false, code: e.code, message: e.message }, e.extra);
     const text = String((e && (e.code || e.message)) || e);
-    if (/permission/i.test(text)) return { ok: false, code: "pin", message: "The database refused that change. Organiser access is not switched on there." };
+    if (/permission/i.test(text)) return { ok: false, code: "pin", refused: true, message: "The database refused that change. Organiser access is not switched on there." };
     console.error(e);
     return { ok: false, code: "error", message: "Something went wrong. Check the connection and try again." };
   }
@@ -74,7 +75,7 @@ const Backends = (() => {
     const base = cfg.sdkBase || "https://www.gstatic.com/firebasejs/10.12.2/";      // sdkBase: the tests swap in a stand-in database
     const [{ initializeApp }, db, au] = await Promise.all([import(base + "firebase-app.js"), import(base + "firebase-database.js"), import(base + "firebase-auth.js")]);
     const fbApp = initializeApp(cfg), database = db.getDatabase(fbApp), auth = au.getAuth(fbApp);
-    let state = Ladder.emptyState(), admins = {}, user = null, loaded = false, connected = true;
+    let state = Ladder.emptyState(), admins = {}, user = null, loaded = false, connected = true, member = false;
     const OFFLINE = { ok: false, code: "offline", message: "No connection, so that has not been saved. Try again when the connection is back." };
     const SLOW = { ok: false, code: "offline", message: "No reply from the database yet. Check the connection, then check the score before entering it again." };
     const timed = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(Object.assign({}, SLOW)), ms))]);
@@ -162,19 +163,76 @@ const Backends = (() => {
       } catch (e) { return failure(e); }
     }
 
+    /* The league as it stands, saved in the database each time a session is finished, so any week can be rolled back.
+       Kept as text beside a small index, and never part of what phones listen to. Not fatal if it cannot be written
+       (database rules from before this existed): the device's own backup is still made. */
+    async function keepCopy(st, sid) {
+      try {
+        const sess = st.sessions.find(x => x.id === sid);
+        const copy = { version: st.version, seq: st.seq, league: st.league, players: st.players, sessions: st.sessions, ratings: st.ratings };
+        await db.update(db.ref(database), {
+          ["copies/index/" + sid]: { at: Date.now(), date: sess ? sess.date : "", sessions: st.sessions.filter(x => x.status === "closed").length, players: Object.keys(st.players).length },
+          ["copies/data/" + sid]: JSON.stringify(copy),
+        });
+        return true;
+      } catch (e) { return false; }
+    }
+    /* What every phone listens to, each on its own. Not the whole database: the league code and the saved copies are
+       kept out of it, and the database rules give no read at the top. */
+    const PARTS = ["league", "players", "seq", "sessions", "ratings", "version", "admins", "availability"];
+    const codeNeeded = { ok: false, code: "code", message: "That needs the league code. Open the link from the league message, or enter the code." };
+
     return {
       kind: "firebase", orgMode: open ? "open" : "account", isOrg,
       hasOrganiser: () => Object.keys(admins).length > 0,
-      signedInNotOrganiser: () => !!user && !admins[user.uid],
+      signedInNotOrganiser: () => !!user && !user.isAnonymous && !admins[user.uid],
+      joined: () => member,
+      /* Show the league code to the database. It files this device as a member, which the rules ask for before a change
+         is accepted. The device signs in without a name or password to get an id of its own to be filed under. */
+      async join(code) {
+        code = String(code || "").trim();
+        if (!code) return { ok: false, code: "code", message: "Enter the league code." };
+        try {
+          const cred = auth.currentUser ? null : await au.signInAnonymously(auth);
+          const uid = (cred ? cred.user : auth.currentUser).uid;
+          await db.set(db.ref(database, "members/" + uid), { k: code, at: Date.now() });
+          member = true;
+          return { ok: true };
+        } catch (e) {
+          const text = String((e && (e.code || e.message)) || e);
+          if (/permission/i.test(text)) return { ok: false, code: "code", message: "That is not the league code. Check it with the organiser." };
+          if (/operation-not-allowed|admin-restricted/i.test(text)) return { ok: false, code: "nocode", message: "League codes are not switched on for this site yet." };
+          return failure(e);
+        }
+      },
+      async copies() {
+        try {
+          const v = (await db.get(db.ref(database, "copies/index"))).val() || {};
+          return Object.keys(v).map(sid => Object.assign({ sid }, v[sid])).sort((a, b) => b.at - a.at);
+        } catch (e) { return []; }
+      },
+      async copy(sid) {
+        try { const v = (await db.get(db.ref(database, "copies/data/" + sid))).val(); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+      },
       start() {
-        db.onValue(db.ref(database, "/"), snap => {
-          const raw = snap.val() || {};
+        const raw = {}, got = new Set();
+        let queued = false;
+        const rebuild = () => {
+          queued = false;
+          if (got.size < PARTS.length) return;
           admins = raw.admins || {};
           const doc = Object.assign({}, raw); delete doc.admins;
           state = Ladder.normalize(doc);
           if (!Object.keys(state.ratings.current).length && Object.keys(state.players).length) state.ratings = Ladder.compute(state);
           loaded = true; emit();
-        }, () => onOnline(false));
+        };
+        /* one change can touch several parts (a Finish writes the session, the ratings and the version): take them in together */
+        PARTS.forEach(k => db.onValue(db.ref(database, k), snap => {
+          const v = snap.val();
+          if (v === null || v === undefined) delete raw[k]; else raw[k] = v;
+          got.add(k);
+          if (!queued) { queued = true; Promise.resolve().then(rebuild); }
+        }, () => onOnline(false)));
         db.onValue(db.ref(database, ".info/connected"), s => { connected = !!s.val(); if (loaded) onOnline(connected); });
         au.onAuthStateChanged(auth, u => { user = u; emit(); });
       },
@@ -183,9 +241,18 @@ const Backends = (() => {
          ratings out itself, and on a phone that alone can pass 12 seconds, which would report a failure that was not one. */
       send(type, args) {
         const heavy = type === "session.close" || type === "session.reopen" || !!(args && args.history);
-        return connected ? timed(this.sendNow(type, args), heavy ? 90000 : 12000) : Promise.resolve(Object.assign({}, OFFLINE));
+        if (!connected) return Promise.resolve(Object.assign({}, OFFLINE));
+        /* with no organiser login, a refusal from the database means this device has not shown it the league code */
+        return timed(this.sendNow(type, args), heavy ? 90000 : 12000).then(j => (j && j.refused && open ? Object.assign({}, codeNeeded) : j));
       },
       async sendNow(type, args) {
+        if (type === "avail.set") {      // a player's own in or out: one small write of its own, whatever else is going on
+          try {
+            const a = Ladder.availCheck(state, args);
+            await db.set(db.ref(database, `availability/${a.date}/${a.pid}`), a.v ? { v: a.v, at: Date.now() } : null);
+            return { ok: true, result: {} };
+          } catch (e) { return failure(e); }
+        }
         if (type === "game.score" || type === "game.clear" || type === "round.confirm") {
           const sess = state.sessions.find(s => s.id === args.sid);
           if (sess && sess.status === "live") return type === "round.confirm" ? confirmLive(sess, args) : scoreLive(type, args, sess);
@@ -219,8 +286,11 @@ const Backends = (() => {
             if (!res.committed || !res.snapshot.exists()) return { ok: false, code: "missing", message: "Session not found." };
             const doc = toDb(state);
             doc.sessions[args.sid] = res.snapshot.val();
-            await db.update(db.ref(database), { ratings: Ladder.compute(Ladder.normalize(doc)), version: (state.version || 0) + 1 });
-            return { ok: true, result: {} };
+            const after = Ladder.normalize(doc);
+            after.ratings = Ladder.compute(after);
+            after.version = (state.version || 0) + 1;
+            await db.update(db.ref(database), { ratings: after.ratings, version: after.version });
+            return { ok: true, result: { saved: await keepCopy(after, args.sid) } };
           } catch (e) { return failure(e); }
         }
         try {

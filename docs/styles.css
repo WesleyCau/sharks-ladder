@@ -464,6 +464,52 @@ a.note { display: block; text-decoration: none; font-weight: 650; }
 .movebar .btn { min-height: 48px; }
 #toast { position: fixed; left: 50%; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60; background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 99px; font-weight: 650; opacity: 0; pointer-events: none; transition: opacity .2s; max-width: calc(100vw - 32px); text-align: center; }
 #toast.show { opacity: 1; }
+
+/* ---------- availability: one compact card for the next night, the count under it, later nights as rows ---------- */
+.av { max-width: 560px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+.av-who { display: flex; align-items: center; gap: 10px; }
+.av-who .av-dot { width: 40px; height: 40px; border-radius: 50%; background: var(--chrome); color: var(--on-chrome); display: grid; place-items: center; font-weight: 750; font-size: 15px; flex: none; }
+.av-who b { display: block; font-size: 18px; line-height: 1.2; }
+.av-who .linkbtn { font-size: 14px; font-weight: 650; }
+input[type=time] { border: 1px solid var(--line-2); background: var(--surface); border-radius: 12px; padding: 12px 14px; min-height: 52px; min-width: 0; width: 100%; }
+.av-ask { background: var(--chrome); color: var(--on-chrome); border-radius: 20px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.av-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.av-q { margin: 0; font-family: "Avenir Next Condensed", "DIN Condensed", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif; text-transform: uppercase; font-weight: 800; font-size: clamp(24px, 6.6vw, 30px); line-height: 1; }
+.av-q em { font-style: normal; color: var(--brand-2); }
+.av-pill { display: inline-block; font-size: 12px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; padding: 3px 10px; border-radius: 99px; background: var(--hot); color: var(--on-hot); white-space: nowrap; }
+.av-pill.in { background: #dff1fd; color: #0a4a7e; }
+.av-pill.out { background: #dfe7ef; color: #2b3a4b; }
+.av-pill.shut { background: #24384f; color: #dbe6f1; }
+.av-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.av-btns button { min-height: 66px; border-radius: 15px; border: 2px solid rgba(255, 255, 255, .3); background: #10263d; color: #fff; font-family: "Avenir Next Condensed", "DIN Condensed", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif; text-transform: uppercase; font-weight: 800; font-size: 27px; letter-spacing: .02em; }
+.av-btns button[aria-pressed="true"].in { background: var(--grad); border-color: transparent; color: var(--on-brand); }
+.av-btns button[aria-pressed="true"].out { background: #dfe7ef; border-color: transparent; color: #0b1622; }
+.av-btns button:disabled { opacity: .55; }
+.av-strip { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid rgba(255, 255, 255, .16); padding-top: 9px; text-align: center; font-variant-numeric: tabular-nums; }
+.av-strip span { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; color: var(--on-chrome-2); }
+.av-strip span + span { border-left: 1px solid rgba(255, 255, 255, .16); }
+.av-strip b { display: block; font-size: 28px; font-weight: 800; line-height: 1.05; color: #fff; letter-spacing: 0; }
+.av-strip .in b { color: var(--brand-2); }
+.av-foot { margin: 0; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13.5px; color: var(--on-chrome-2); font-variant-numeric: tabular-nums; }
+.av-names { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.av-names h3 { margin: 0 0 2px; font-size: 12.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.av-names p { margin: 0; color: var(--ink-2); }
+.av-names p b { color: var(--ink); }
+.av-row { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.av-row .when { min-width: 0; }
+.av-row .when b { display: block; font-size: 17px; }
+.av-row .when span { display: block; font-size: 13.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.av-mini { display: flex; gap: 6px; flex: none; }
+.av-mini button { min-width: 62px; min-height: 48px; border-radius: 12px; border: 2px solid var(--line-2); background: var(--surface); color: var(--ink); font-weight: 800; font-size: 16px; }
+.av-mini button[aria-pressed="true"].in { background: var(--grad); border-color: transparent; color: var(--on-brand); }
+.av-mini button[aria-pressed="true"].out { background: var(--chrome); border-color: transparent; color: var(--on-chrome); }
+.av-mini button:disabled { opacity: .55; }
+.av-pick { display: flex; flex-direction: column; gap: 6px; }
+.av-pick button { min-height: 54px; text-align: left; padding: 8px 14px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); font-size: 18px; font-weight: 650; }
+.nights { display: flex; flex-wrap: wrap; gap: 8px; }
+.night { display: inline-flex; align-items: center; gap: 6px; background: var(--soft); border-radius: 99px; padding: 6px 6px 6px 12px; font-weight: 650; }
+.night button { border: 0; background: var(--surface); color: var(--ink-2); width: 32px; height: 32px; border-radius: 50%; font-size: 18px; line-height: 1; }
+.copybox { font: inherit; font-size: 14px; width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); }
 #toast:empty { display: none; }      /* nothing to say yet: no pill fading out as the page loads */
 
 @media (min-width: 900px) {

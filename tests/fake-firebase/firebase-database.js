@@ -49,6 +49,7 @@ export async function update(r, changes) {
   settle(false);
 }
 export async function set(r, value) { setAt(r.path, value); settle(false); }
+export async function get(r) { return snap(r.path); }
 export async function runTransaction(r, fn) {
   const next = fn(clone(clean(valueAt(r.path))));
   if (next === undefined) return { committed: false, snapshot: snap(r.path) };

@@ -1,0 +1,33 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": "auth != null && root.child('members').child(auth.uid).child('k').val() === 'PUT-THE-LEAGUE-CODE-HERE'",
+    "members": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid && newData.child('k').val() === 'PUT-THE-LEAGUE-CODE-HERE'"
+      }
+    },
+    "admins": { ".read": true },
+    "league": { ".read": true },
+    "players": { ".read": true },
+    "ratings": { ".read": true },
+    "seq": { ".read": true },
+    "version": { ".read": true },
+    "availability": { ".read": true },
+    "copies": { ".read": true },
+    "sessions": {
+      ".read": true,
+      "$sid": {
+        "games": {
+          "$gid": { ".write": "root.child('sessions').child($sid).child('status').val() === 'live'" }
+        },
+        "pools": {
+          "$pool": {
+            "confirmed": { ".write": "root.child('sessions').child($sid).child('status').val() === 'live'" }
+          }
+        }
+      }
+    }
+  }
+}

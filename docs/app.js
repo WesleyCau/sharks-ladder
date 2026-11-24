@@ -46,9 +46,27 @@ function shortNames(players) {
   return out;
 }
 function setOnline(on) { if (app.online !== on) { app.online = on; render(); } }
+/* ---------- the league code and "who am I", remembered on this device ---------- */
+const CODE_KEY = "sharks-code", ME_KEY = "sharks-me";
+const keep = {
+  get: k => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } },
+  set: (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) { /* private window: it lasts until the page closes */ } },
+};
+/* The code arrives in the address (…/?k=code). It is kept on the device, and put back into the address when it is
+   missing, so a bookmark or a home-screen icon made later still carries it. */
+function leagueCode() {
+  let inUrl = "";
+  try { inUrl = new URLSearchParams(location.search).get("k") || ""; } catch (e) { /* no address to read */ }
+  if (inUrl) keep.set(CODE_KEY, inUrl);
+  const code = inUrl || keep.get(CODE_KEY);
+  if (code && !inUrl) { try { history.replaceState(null, "", location.pathname + "?k=" + encodeURIComponent(code) + location.hash); } catch (e) { /* not allowed here */ } }
+  return code;
+}
 async function boot() {
   app.be = await Backends.pick(accept, setOnline);
   app.be.start();
+  const code = leagueCode();
+  if (code && app.be.join) app.be.join(code);      // quietly: a wrong or old code only matters when a change is refused
 }
 function toast(msg, ms) {
   const t = $("#toast");
@@ -63,6 +81,7 @@ async function act(area, type, args, okMsg) {
   let j;
   try { j = await send(type, args); } finally { inFlight.delete(key); }
   app.err[area] = j.ok ? "" : j.message;
+  if (!j.ok && j.code === "code") app.needCode = true;      // the database wants the league code: ask for it at the top of the page
   if (j.ok && okMsg) toast(okMsg);
   render();
   return j;
@@ -267,11 +286,12 @@ function shell(body) {
     <div class="top-l"><a class="brand" href="#/pickleball" title="About the league">${esc(app.st.league.name)}</a>${s && s.status === "live" ? '<span class="live-dot">Live</span>' : ""}</div>
     <div class="top-c">${route === "board" && fsCan() ? `<button class="fsbtn" data-act="fullscreen">${fsOn() ? "Exit full screen" : "Full screen"}</button>` : ""}</div>
     <nav class="nav" aria-label="Main">
-      ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${link("#/org", "org", "⚙", "Organiser")}
+      ${link("#/", "", "●", "Tonight")}${link("#/board", "board", "▦", "All courts")}${link("#/standings", "standings", "≡", "Standings")}${availNav() ? link("#/in", "in", "✓", "Availability") : ""}${link("#/org", "org", "⚙", "Organiser")}
     </nav>
   </div></header>
   ${app.online ? "" : '<div class="offline">No connection. Scores will not save until it is back.</div>'}
   ${app.be.kind === "local" ? '<div class="demo">Single-device mode: everything is saved in this browser only.</div>' : ""}
+  ${app.needCode ? codeCard() : ""}
   <main class="${route === "board" ? "wide" : route === "pickleball" ? "bleed" : ""}">${body}</main>`;
 }
 const errLine = area => (app.err[area] ? `<p class="err" role="alert">${esc(app.err[area])}</p>` : "");
@@ -407,13 +427,107 @@ function resultRows(s, pool, canEdit, upto) {
 }
 
 /* ---------- Tonight ---------- */
+/* ---------- availability ---------- */
+const season = () => Ladder.seasonOf(app.st);
+const availOn = () => app.be.kind !== "server";      // the laptop version has no availability: it is for the hosted site
+/* league nights still to come: today or later, and not already played */
+const nightsLeft = () => season().dates.filter(d => d >= todayIso() && !closedSess().some(x => x.date === d));
+const availNav = () => availOn() && nightsLeft().length > 0;
+const shortDay = d => new Date(d + "T00:00").toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+function closesAt(date) { const x = season(), d = new Date(date + "T" + x.time); d.setDate(d.getDate() - x.days); return d; }
+const isShut = date => Date.now() >= closesAt(date).getTime();
+const closesTxt = date => closesAt(date).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+const poolSizes = n => { if (n < Ladder.MIN_POOL) return ""; const k = Ladder.poolCount(n), b = Math.floor(n / k); return Array.from({ length: k }, (_, i) => b + (i < n % k ? 1 : 0)).join(", "); };
+const saidFor = (date, pid) => { const a = (app.st.availability[date] || {})[pid]; return a ? a.v : null; };
+const me = () => { const id = keep.get(ME_KEY); return id && app.st.players[id] && app.st.players[id].active ? id : ""; };
+const availLink = () => (availNav() ? `<p class="note">Next league night: <b>${shortDay(nightsLeft()[0])}</b>. <a href="#/in"><b>Say if you are in or out</b></a>.</p>` : "");
+function codeCard() {
+  return `<form class="card" data-form="code" style="max-width:560px;width:100%;margin:12px auto 0"><h2>League code needed</h2>
+    <p class="muted">Changes are only taken from people in the league. Open the link from the league message, or type the code here once. This device will remember it.</p>
+    <div class="row" style="align-items:flex-end"><label class="field">League code<input id="lcode" type="text" autocomplete="off" autocapitalize="none" value="${esc(app.form.lcode || "")}"></label>
+    <button class="btn primary" type="submit">Use this code</button><button class="btn" type="button" data-act="nocode">Not now</button></div>${errLine("code")}</form>`;
+}
+function viewIn() {
+  if (!availOn()) return `<div class="head"><h1>Availability</h1><p class="muted">Availability is on the league's website, not on this laptop version.</p></div>`;
+  const nights = nightsLeft();
+  if (!nights.length) return `<div class="av"><div class="head"><h1>Availability</h1><p class="muted">No league nights are set at the moment.</p></div>
+    <a class="btn" href="#/org/settings">Organiser: set the season's nights</a></div>`;
+  const id = me();
+  if (!id) {
+    const q = (app.form.meq || "").toLowerCase();
+    const list = Object.values(app.st.players).filter(p => p.active && (!q || p.name.toLowerCase().includes(q))).sort((a, b) => a.name.localeCompare(b.name));
+    return `<div class="av"><div class="head"><h1>Who are you?</h1><p class="muted">Tap your name once. This phone will remember it.</p></div>
+      <label class="field">Find your name<input id="meq" type="search" value="${esc(app.form.meq || "")}" placeholder="Start typing"></label>
+      <div class="av-pick">${list.map(p => `<button data-act="me" data-pid="${p.id}">${esc(p.name)}</button>`).join("") || '<p class="muted">Nobody by that name. Ask the organiser to add you.</p>'}</div></div>`;
+  }
+  const first = nights[0], mine = saidFor(first, id), c = Ladder.availCount(app.st, first), shut = isShut(first), show = season().names;
+  const initials = nm(id).split(/\s+/).map(w => w[0] || "").slice(0, 2).join("").toUpperCase();
+  const pill = (v, closed) => (closed && !v ? '<span class="av-pill shut">Closed</span>' : v === "in" ? '<span class="av-pill in">You are in</span>' : v === "out" ? '<span class="av-pill out">You are out</span>' : '<span class="av-pill">No answer yet</span>');
+  const btns = (date, v, cls, closed) => `<div class="${cls}">${[["in", "In"], ["out", "Out"]].map(([k, l]) => `<button class="${k}" id="av-${date}-${k}" data-act="avail" data-date="${date}" data-v="${k}" aria-pressed="${v === k}" ${closed ? "disabled" : ""}>${l}</button>`).join("")}</div>`;
+  const names = ids => ids.map(p => ({ p, n: nm(p) })).sort((a, b) => a.n.localeCompare(b.n)).map(x => (x.p === id ? `<b>${esc(x.n)}</b>` : esc(x.n))).join(", ") || "Nobody yet";
+  const sizes = poolSizes(c.in.length), later = nights.slice(1);
+  const allIn = nights.every(d => saidFor(d, id) === "in" || isShut(d));
+  return `<div class="av">
+    <div class="av-who"><span class="av-dot" aria-hidden="true">${esc(initials)}</span><div><b>${esc(nm(id))}</b><button class="linkbtn" data-act="notme" style="margin-left:0;padding-left:0">Not you?</button></div></div>
+    <div class="av-ask"><div class="av-head"><p class="av-q">Playing <em>${esc(shortDay(first))}</em>?</p>${pill(mine, shut)}</div>
+      ${btns(first, mine, "av-btns", shut)}
+      <div class="av-strip"><span class="in"><b>${c.in.length}</b>In</span><span><b>${c.none.length}</b>No answer</span><span><b>${c.out.length}</b>Out</span></div>
+      <p class="av-foot"><span>${sizes ? "Pools of " + sizes : "Not enough for a pool yet"}</span><span>${shut ? "Answers closed " + esc(closesTxt(first)) + ". Tell the organiser if your plans change." : "Closes " + esc(closesTxt(first))}</span></p></div>
+    ${errLine("in")}
+    ${show ? `<button class="linkbtn" data-act="avnames" aria-expanded="${!!app.avNames}" style="align-self:flex-start;margin-left:0">${app.avNames ? "Hide names" : "Show names"}</button>` : ""}
+    ${show && app.avNames ? `<div class="av-names"><div><h3>In (${c.in.length})</h3><p>${names(c.in)}</p></div><div><h3>No answer (${c.none.length})</h3><p>${names(c.none)}</p></div><div><h3>Out (${c.out.length})</h3><p>${names(c.out)}</p></div></div>` : ""}
+    ${later.length ? `<p class="muted" style="margin:4px 0 -4px">Later nights</p>` + later.map(d => { const k = Ladder.availCount(app.st, d); return `<div class="av-row"><div class="when"><b>${esc(shortDay(d))}</b><span>${k.in.length} in · ${k.none.length} no answer · ${k.out.length} out</span></div>${btns(d, saidFor(d, id), "av-mini", isShut(d))}</div>`; }).join("") : ""}
+    ${nights.length > 1 && !allIn ? `<button class="btn" data-act="availall">I am in for every night left</button>` : ""}
+    <p class="muted">You can change an answer any time before a night closes.</p></div>`;
+}
+/* Organiser, setting up a session: what players have said for that night, next to who is on the list. */
+function availLine(s) {
+  if (!availOn() || !season().dates.includes(s.date)) return "";
+  const c = Ladder.availCount(app.st, s.date), want = new Set(c.in), on = new Set(s.attending);
+  const add = c.in.filter(p => !on.has(p)), drop = s.attending.filter(p => !want.has(p));
+  return `<div class="note"><b>Availability for this night:</b> ${c.in.length} in, ${c.none.length} no answer, ${c.out.length} out.
+    ${add.length || drop.length ? `The list below differs: ${[add.length ? add.length + " said in but not on it" : "", drop.length ? drop.length + " on it without saying in" : ""].filter(Boolean).join(", ")}.
+      <div class="row" style="margin-top:8px"><button class="btn small primary" data-act="useAvail" data-sid="${s.id}">Match the list to availability</button></div>` : "The list below matches it."}${errLine("avail")}</div>`;
+}
+/* Organiser settings: the season's nights, when answers close, and the link players use. */
+function seasonCard() {
+  if (!availOn()) return "";
+  const x = season(), code = app.form.scode ?? keep.get(CODE_KEY), link = location.origin + location.pathname + (code ? "?k=" + encodeURIComponent(code) : "") + "#/in";
+  const dayNames = ["On the day", "The day before", "2 days before", "3 days before", "4 days before", "5 days before", "6 days before"];
+  return `<div class="card"><h2>Season nights and availability</h2>
+      <p class="muted">Players say in or out for each night on the Availability page. A new session starts with the players who said in.</p>
+      ${x.dates.length ? `<div class="nights">${x.dates.map(d => `<span class="night">${esc(shortDay(d))} ${d.slice(0, 4)}${app.confirm === "night:" + d ? `<button class="btn small danger" style="width:auto;border-radius:10px;padding:0 10px" data-act="seasondrop" data-date="${d}">Remove</button>` : `<button data-act="ask" data-key="night:${d}" aria-label="Remove ${esc(shortDay(d))}">×</button>`}</span>`).join("")}</div>` : '<p class="muted">No nights set yet.</p>'}
+      <form data-form="seasonadd" class="row" style="align-items:flex-end"><label class="field">First night<input id="sfirst" type="date" value="${esc(app.form.sfirst || "")}"></label>
+        <label class="field">How many weeks<input id="sweeks" type="number" min="1" max="30" value="${esc(app.form.sweeks || "1")}"></label>
+        <button class="btn" type="submit">Add these nights</button></form>${errLine("season")}
+      <form data-form="seasonclose" class="row" style="align-items:flex-end"><label class="field">Answers close<select id="sdays">${dayNames.map((l, i) => `<option value="${i}" ${+(app.form.sdays ?? x.days) === i ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field">at<input id="stime" type="time" value="${esc(app.form.stime ?? x.time)}"></label>
+        <button class="btn" type="submit">Save</button></form>
+      <div class="row spread"><span><b>Players can see who is in</b><br><span class="muted">The counts always show. This is about the names.</span></span>
+        <span class="seg" role="group" aria-label="Players can see who is in">${[[true, "Names shown"], [false, "Counts only"]].map(([v, l]) => `<button type="button" data-act="seasonnames" data-on="${v ? 1 : ""}" aria-pressed="${x.names === v}">${l}</button>`).join("")}</span></div>
+      <label class="field">League code, to build the link players use<input id="scode" type="text" autocomplete="off" autocapitalize="none" value="${esc(code)}" placeholder="the code set in the database rules"></label>
+      <input class="copybox" id="slink" type="text" readonly value="${esc(link)}" aria-label="Link for players">
+      <div class="row"><button class="btn" data-act="copylink">Copy the link</button><span class="muted">Send it to the league once. It opens the Availability page and carries the code.</span></div></div>`;
+}
+/* Organiser settings: the league as it was saved in the database at each Finish. */
+function copiesCard() {
+  if (!app.be.copies) return "";
+  if (!app.copiesAsked) { app.copiesAsked = true; app.be.copies().then(list => { app.copies = list; render(); }); }
+  const list = app.copies || [];
+  return `<div class="card"><h2>Copies saved on the site</h2>
+      <p class="muted">Every time a session is finished, the whole league is saved here with the new rankings, so any week can be brought back. Players' availability is not changed by a restore.</p>
+      ${list.length ? `<div class="results">${list.map(x => `<div class="res" style="grid-template-columns:1fr auto"><span class="who"><b>After ${x.date ? esc(dayMonth(x.date)) : "a session"}</b> <span class="muted">saved ${new Date(x.at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} · ${x.sessions} sessions · ${x.players} players</span></span>
+        ${app.confirm === "copy:" + x.sid ? `<span class="row"><button class="btn small danger" data-act="restorecopy" data-sid="${x.sid}"${liveNow() ? ' data-live="1"' : ""}>${liveNow() ? "Yes, replace it, live session included" : "Yes, go back to this"}</button><button class="btn small" data-act="cancel">Cancel</button></span>` : `<button class="btn small" data-act="ask" data-key="copy:${x.sid}">Restore</button>`}</div>`).join("")}</div>` : `<p class="muted">${app.copies ? "None yet. The first is made the next time a session is finished." : "Looking…"}</p>`}
+      ${(app.confirm || "").startsWith("copy:") ? liveWarn() : ""}${errLine("copies")}</div>`;
+}
+
 function viewHome() {
   const s = openSess(), last = closedSess().pop();
   const join = app.be.kind === "server" ? (app.urls.length ? `<p class="note">Players on this Wi-Fi open <b>${esc(app.urls[0])}</b> on their phone.</p>` : "")
     : app.be.kind === "firebase" ? `<p class="note">Players open <b>${esc(location.origin + location.pathname)}</b> on their phone.</p>` : "";
   if (!s) {
     return `<div class="head"><h1>No session running</h1><p class="muted">${last ? "Last session: " + niceDate(last.date) + "." : "No sessions played yet."}</p></div>
-      <div class="row"><a class="btn primary" href="#/standings">See standings</a><a class="btn" href="#/org">Organiser: set up a session</a></div>${join}`;
+      <div class="row"><a class="btn primary" href="#/standings">See standings</a><a class="btn" href="#/org">Organiser: set up a session</a></div>${availLink()}${join}`;
   }
   if (s.status === "setup") {
     const pools = s.pools.filter(p => p.players.length);
@@ -886,11 +1000,14 @@ function orgSession() {
     const last = closedSess().pop();
     let def = todayIso();                         // a week after the last session, but never a day already gone
     if (last) { const d = new Date(last.date + "T00:00"); d.setDate(d.getDate() + 7); const next = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; if (next > def) def = next; }
+    const nights = availOn() ? nightsLeft() : [];
+    if (nights.length) def = nights[0];                // the league calendar knows the next night
     def = app.form.newdate || def;
+    const saidIn = Object.keys(app.st.availability[def] || {}).length ? Ladder.availCount(app.st, def).in.length : null;
     const clash = closedSess().some(x => x.date === def);
     const far = (new Date(def + "T00:00") - new Date(todayIso() + "T00:00")) / 864e5 > 60;
     return `<form class="card" data-form="create"><h2>New session</h2>
-      <p class="muted">Starts with the players who came last time. You can change who is playing next.</p>
+      <p class="muted">${saidIn !== null ? `Starts with the ${saidIn} player${saidIn === 1 ? "" : "s"} who said they are in for that night.` : "Starts with the players who came last time."} You can change who is playing next.</p>
       <div class="row"><label class="field">Date<input id="newdate" type="date" value="${esc(def)}" ${last ? `min="${last.date}"` : ""}></label></div>
       ${clash ? `<p class="note warn">⚠ There is already a finished session on ${dayMonth(def)}. A second one will be listed as ${dayMonth(def)} (2).</p>` : ""}
       ${far ? `<p class="note warn">⚠ ${dayMonth(def)} ${def.slice(0, 4)} is more than two months away. Check the month and year.</p>` : ""}
@@ -955,6 +1072,7 @@ function orgSetup(s) {
   return `
   <div class="row spread"><h2>${niceDate(s.date)}</h2>
     ${app.confirm === "delete" ? `<span class="row"><button class="btn small danger" data-act="delete" data-sid="${s.id}">Yes, delete it</button><button class="btn small" data-act="cancel">Keep</button></span>` : `<button class="btn small" data-act="ask" data-key="delete">Delete session</button>`}</div>
+  ${availLine(s)}
 
   <div class="card"><div class="row spread"><h2>1. Who is playing <span class="muted num">(${s.attending.length})</span></h2>
       <span class="row">${closedSess().length ? `<button class="btn small" data-act="attendAll" data-sid="${s.id}" data-last="1">Same as last week</button>` : ""}<button class="btn small" data-act="attendAll" data-sid="${s.id}" data-on="1">Everyone</button><button class="btn small" data-act="attendAll" data-sid="${s.id}" data-on="">No one</button></span></div>
@@ -1077,6 +1195,7 @@ function orgSettings() {
       <button class="btn primary" type="submit">Save</button></div>${errLine("league")}
       <div class="row spread"><span><b>Names on match screens</b><br><span class="muted">The ratings list, player pages and the roster always show full names.</span></span>
         <span class="seg" role="group" aria-label="Names on match screens">${[["short", "First name + initial"], ["full", "Full names"]].map(([k, l]) => `<button type="button" data-act="nameStyle" data-style="${k}" aria-pressed="${(lg.nameStyle || "short") === k}">${l}</button>`).join("")}</span></div></form>
+    ${seasonCard()}
     <div class="card"><h2>Connecting</h2>
       ${app.be.kind === "firebase" ? `<p>Everyone opens <b>${esc(location.origin + location.pathname)}</b>. Scores sync live between all phones and tablets.</p>
           ${app.be.orgMode === "open" ? '<p class="muted">Organiser login is switched off, so save a copy below before each session. The login can be switched back on later.</p>' : ""}`
@@ -1084,6 +1203,7 @@ function orgSettings() {
           <p class="muted">${app.be.orgMode === "open" ? 'The organiser PIN is switched off. To require it again, set "open" to false in data/config.json on the computer running the league.' : "The organiser PIN is stored in the file data/config.json on the computer running the league."}</p>`
         : `<p>Single-device mode. Everything is saved in this browser only, so other phones cannot see it. Add the Firebase details to config.js to share it live.</p>`}
       <p class="muted">Starting seeds are ${lg.seeds.map(v => (v / 1000).toFixed(1)).join(", ")}.</p></div>
+    ${copiesCard()}
     <div class="card"><h2>League data</h2>
       <p class="muted">${app.be.replaceAll ? "Save a copy of everything, or load a league file. Loading replaces all players, sessions and scores." : "Save a copy of everything to this device."}</p>
       <div class="row"><button class="btn" data-act="export">Save a copy</button>
@@ -1275,7 +1395,7 @@ function whenSettled(fn) { if (overlayLeaving) afterOverlay.push(fn); else fn();
 function render() {
   if (!app.st) return;
   const [, route, a, b] = location.hash.split("/");
-  const view = route === "court" ? viewCourt((a || "").toUpperCase()) : route === "board" ? viewBoard() : route === "standings" ? viewStandings() : route === "player" ? viewPlayer(a) : route === "org" ? viewOrg(a, b) : route === "pickleball" ? viewPickleball() : viewHome();
+  const view = route === "court" ? viewCourt((a || "").toUpperCase()) : route === "board" ? viewBoard() : route === "standings" ? viewStandings() : route === "player" ? viewPlayer(a) : route === "org" ? viewOrg(a, b) : route === "pickleball" ? viewPickleball() : route === "in" ? viewIn() : viewHome();
   const focused = document.activeElement && document.activeElement.id, selStart = focused && document.activeElement.selectionStart;
   const html = shell(view);
   /* the front page: leave it alone when nothing in it changed, so the photo is not redrawn on every update */
@@ -1342,6 +1462,27 @@ const A = {
   confirmRound: d => act("court", "round.confirm", { sid: d.sid, pool: d.pool, round: +d.round }, "Round confirmed"),
   backRound: d => { app.confirm = null; return act("court", "round.back", { sid: d.sid, pool: d.pool }, "Back one round"); },
   nameStyle: d => act("league", "league.update", { nameStyle: d.style }),
+  me: d => { keep.set(ME_KEY, d.pid); app.form.meq = ""; render(); },
+  notme: () => { keep.set(ME_KEY, ""); render(); },
+  nocode: () => { app.needCode = false; app.err.code = ""; render(); },
+  avnames: () => { app.avNames = !app.avNames; render(); },
+  avail: async d => { const id = me(); if (!id) return render(); await act("in", "avail.set", { date: d.date, pid: id, v: d.v }); const again = document.getElementById(`av-${d.date}-${d.v}`); if (again) again.focus(); },
+  availall: async () => { const id = me(); for (const date of nightsLeft()) if (!isShut(date) && saidFor(date, id) !== "in") { const j = await act("in", "avail.set", { date, pid: id, v: "in" }); if (!j.ok) break; } },
+  useAvail: d => act("avail", "session.useAvail", { sid: d.sid }, "List matched to availability"),
+  seasondrop: d => { app.confirm = null; return act("season", "season.set", { dates: season().dates.filter(x => x !== d.date) }, "Night removed"); },
+  seasonnames: d => act("season", "season.set", { names: !!d.on }),
+  copylink: async () => { const el = $("#slink"); try { await navigator.clipboard.writeText(el.value); toast("Link copied"); } catch (e) { el.focus(); el.select(); toast("Select and copy the link"); } },
+  restorecopy: async d => {
+    app.confirm = null;
+    backupLocal("restore");
+    const doc = await app.be.copy(d.sid);
+    const j = doc ? await app.be.replaceAll(doc, { overLive: !!d.live }) : { ok: false, message: "That copy could not be read. Check the connection and try again." };
+    if (j.code === "live") app.confirm = "copy:" + d.sid;
+    if (j.refused || j.code === "code") app.needCode = true;
+    app.err.copies = j.ok ? "" : j.message;
+    if (j.ok) toast("League restored");
+    render();
+  },
   fullscreen: () => fsToggle(),
   toggleSkip: () => { app.showSkip = !app.showSkip; render(); },
   tab: d => { app.tab = d.tab; render(); },
@@ -1412,6 +1553,7 @@ const A = {
     backupLocal("session.close");
     let j = { ok: false };
     try { j = await act("live", "session.close", { sid: d.sid }, "Session finished. Ratings updated."); } finally { app.closing = false; }
+    app.copiesAsked = false;      // a new copy was saved with this Finish: list them again next time
     if (j.ok) { app.tab = "ratings"; location.hash = "#/standings"; }
     render();
   }),
@@ -1429,6 +1571,22 @@ async function account(method) {
 }
 
 const FORMS = {
+  code: async () => {
+    const code = (app.form.lcode || "").trim();
+    const j = app.be.join ? await app.be.join(code) : { ok: false, message: "This version does not use a league code." };
+    app.err.code = j.ok ? "" : j.message;
+    if (j.ok) { keep.set(CODE_KEY, code); leagueCode(); app.needCode = false; app.form.lcode = ""; app.err = {}; toast("Code accepted. Try that again."); }
+    render();
+  },
+  seasonadd: () => {
+    const first = app.form.sfirst || "", weeks = Math.max(1, Math.min(30, parseInt(app.form.sweeks || "1", 10) || 1));
+    if (!first) { app.err.season = "Pick the first night."; return render(); }
+    const dates = season().dates.slice();
+    for (let i = 0; i < weeks; i++) { const d = new Date(first + "T00:00"); d.setDate(d.getDate() + 7 * i); dates.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`); }
+    app.form.sfirst = "";
+    return act("season", "season.set", { dates }, "Nights added");
+  },
+  seasonclose: () => act("season", "season.set", { days: app.form.sdays ?? season().days, time: app.form.stime ?? season().time }, "Saved"),
   pin: async () => {
     const j = await app.be.signIn({ pin: (app.form.pin || "").trim() });
     app.err.pin = j.ok ? "" : j.message;
@@ -1475,7 +1633,7 @@ document.addEventListener("submit", e => {
 document.addEventListener("input", e => {
   if (!e.target.id) return;
   app.form[e.target.id] = e.target.value;
-  if (e.target.id === "q" || e.target.id === "newdate" || e.target.id === "rq") render();
+  if (e.target.id === "q" || e.target.id === "newdate" || e.target.id === "rq" || e.target.id === "meq" || e.target.id === "scode") render();
 });
 document.addEventListener("change", async e => {
   if (e.target.id === "importfile") {

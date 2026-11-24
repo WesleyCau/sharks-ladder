@@ -38,6 +38,20 @@ The site in `docs/` picks the mode itself: Firebase if `docs/config.js` has the 
 
 To switch the login on: enable **Authentication > Email/Password** in Firebase, set `openOrganiser: false`, publish `database.rules.login.json` in the Rules tab, and create the organiser account on the Organiser tab (the first account created becomes the organiser). With those rules anyone can read the league and enter scores during a live session, and only the organiser account can change players, pools, sessions or finished scores. The Firebase config values are not secret; the database rules are what protect the data.
 
+## Availability and the league code
+
+Players say in or out for each league night on the **Availability** page (hosted site and single-device mode; not on the laptop version). The organiser sets the season's nights and when answers close under Organiser, Settings. A new session starts with the players who said in, and the setup screen shows any difference between the list and the answers.
+
+Each time a session is finished, the hosted site saves the whole league in the database (`copies/`), listed under Organiser, Settings, so any week can be rolled back. A restore does not touch players' answers.
+
+**The league code** keeps strangers and scanners from changing anything. It is switched on in Firebase, once:
+
+1. **Authentication > Sign-in method:** enable **Anonymous**. A device needs an id of its own to be filed as a member. No names or passwords are involved.
+2. **Realtime Database > Rules:** paste `database.rules.code.json`, replace `PUT-THE-LEAGUE-CODE-HERE` (it appears twice) with a code of your choice, and publish. Do not commit the real code to this repository.
+3. Under Organiser, Settings, type the same code to build the players' link, and send that link to the league. The code stays in the address, so a bookmark or home-screen icon keeps working.
+
+With those rules: anyone can read the ladder; a change is only accepted from a device that has opened the link (or typed the code once); scores and round confirms are also accepted from any device while a session is live, so nobody is blocked at the courts. To change the code for a new season, edit it in the Rules tab and send the new link. Until the rules are published the site behaves as before and the code is not checked.
+
 ## Local server
 
 ```
