@@ -72,6 +72,50 @@ async function test(name, fn) {
     assert.strictEqual(db.read(`sessions/${sid}/pools/0/confirmed`), 1);
   });
 
+  await test("not played is refused on a game a phone has just scored", async () => {
+    const hit = pool.rounds[5][0], free = pool.rounds[5][1];
+    db.write(`sessions/${sid}/games/${hit}`, Object.assign({}, db.read(`sessions/${sid}/games/${hit}`), { s1: 11, s2: 6, status: "done", at: 1 }), true);
+    assert.strictEqual(state.sessions.find(s => s.id === sid).games[hit].status, "pending");      // this device has not seen it
+    const j = await be.send("game.skip", { sid, gid: hit });
+    assert.strictEqual(j.code, "scores");
+    assert.deepStrictEqual([db.read(`sessions/${sid}/games/${hit}/status`), db.read(`sessions/${sid}/games/${hit}/s1`), db.read(`sessions/${sid}/games/${hit}/s2`)], ["done", 11, 6]);
+    await ok("game.skip", { sid, gid: free });
+    assert.strictEqual(db.read(`sessions/${sid}/games/${free}/status`), "skipped");
+    await ok("game.skip", { sid, gid: free, skip: false });
+    assert.strictEqual(db.read(`sessions/${sid}/games/${free}/status`), "pending");
+    assert.strictEqual(db.read(`sessions/${sid}/pools/0/confirmed`), 1);                           // the rest of the session is as it was
+    assert.strictEqual(Object.keys(db.read(`sessions/${sid}/games`)).length, 14);
+  });
+
+  await test("a substitute leaves a game a phone has just scored with the players who played it", async () => {
+    const sub = (await ok("player.add", { name: "Stand In", seed: 3.3 })).id;
+    const games = db.read(`sessions/${sid}/games`), out = games[pool.rounds[6][0]].t1[0];
+    const just = pool.rounds[6][0], later = Object.values(games).find(g => g.status === "pending" && g.id !== just && g.round !== 1 && g.round !== 2 && g.t1.concat(g.t2).includes(out)).id;
+    db.write(`sessions/${sid}/games/${just}`, Object.assign({}, games[just], { s1: 4, s2: 11, status: "done", at: 2 }), true);
+    assert.strictEqual(state.sessions.find(s => s.id === sid).games[just].status, "pending");     // this device has not seen it
+    await ok("session.substitute", { sid, out, in: sub });
+    const after = db.read(`sessions/${sid}`);
+    assert.ok(after.games[just].t1.includes(out) && !after.games[just].t1.concat(after.games[just].t2).includes(sub), "the scored game keeps who played it");
+    assert.deepStrictEqual([after.games[just].status, after.games[just].s1, after.games[just].s2], ["done", 4, 11]);
+    assert.ok(after.games[later].t1.concat(after.games[later].t2).includes(sub) && !after.games[later].t1.concat(after.games[later].t2).includes(out), "games still to play go to the substitute");
+    assert.ok(after.pools[0].players.includes(sub) && !after.pools[0].players.includes(out));
+    assert.ok(after.attending.includes(out) && after.attending.includes(sub), "the player who left has a result tonight, so stays on the list");
+  });
+
+  await test("loading a league over a live session needs an explicit yes", async () => {
+    db.flush();
+    const copy = JSON.parse(JSON.stringify(state)), scored = Object.values(db.read(`sessions/${sid}/games`)).filter(g => g.status === "done").length;
+    copy.sessions = copy.sessions.filter(s => s.id !== sid);                 // a file from before tonight
+    const j = await be.replaceAll(copy);
+    assert.strictEqual(j.code, "live");
+    assert.ok(j.message.includes(scored + " score"));
+    assert.strictEqual(db.read(`sessions/${sid}/status`), "live");
+    assert.strictEqual(Object.values(db.read(`sessions/${sid}/games`)).filter(g => g.status === "done").length, scored);
+    const now = JSON.parse(JSON.stringify(state));
+    assert.ok((await be.replaceAll(now, { overLive: true })).ok);            // said yes: it goes through (here, with the league as it is)
+    assert.strictEqual(db.read(`sessions/${sid}/status`), "live");
+  });
+
   await test("finishing keeps a score that arrives at the same moment, and rates it", async () => {
     const late = pool.rounds[1][0], untouched = pool.rounds[2][0];
     db.write(`sessions/${sid}/games/${late}`, Object.assign({}, db.read(`sessions/${sid}/games/${late}`), { s1: 11, s2: 4, status: "done", at: 1 }), true);

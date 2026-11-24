@@ -3,7 +3,7 @@
      firebase  shared live database (the hosted site, once config.js has the Firebase details)
      server    the Python server in this repo (laptop on the venue Wi-Fi)
      local     this browser only (demo and single-device use)
-   Interface: { kind, orgMode, isOrg(), start(), send(type, args), signIn(), signOut(), replaceAll(doc) } */
+   Interface: { kind, orgMode, isOrg(), start(), send(type, args), signIn(), signOut(), replaceAll(doc, { overLive }) } */
 const Backends = (() => {
   const clone = x => JSON.parse(JSON.stringify(x));
   function failure(e) {
@@ -129,6 +129,39 @@ const Backends = (() => {
       } catch (e) { return failure(e); }
     }
 
+    /* Organiser changes to a live session that depend on what has been scored: a game marked not played, a substitute,
+       a reset, back to setup, a pool's courts or target. Each is made inside one database transaction on the session,
+       against the session as the database holds it at that moment, not this device's copy of it. A score a phone saved
+       a moment ago is therefore seen: the change is refused ("clear the score first") or made around it (a substitute
+       leaves that game with the players who played it), never written over it. */
+    const ON_SESSION = new Set(["game.skip", "session.substitute", "session.reset", "session.unstart", "session.pool"]);
+    const prune = v => {      // the database stores no nulls: leave them out of what is written
+      if (Array.isArray(v)) return v.map(prune);
+      if (!isObj(v)) return v;
+      const o = {};
+      for (const k in v) if (v[k] !== null && v[k] !== undefined) o[k] = prune(v[k]);
+      return o;
+    };
+    async function sessionLive(type, args) {
+      let stop = null, result = {};
+      try {
+        const res = await db.runTransaction(db.ref(database, `sessions/${args.sid}`), cur => {
+          stop = null;
+          if (cur === null) return cur;                       // not loaded yet: the database retries with the real value
+          try {
+            const doc = toDb(state);
+            doc.sessions[args.sid] = cur;
+            const next = Ladder.normalize(doc);
+            result = Ladder.apply(next, type, args, true) || {};
+            return prune(toDb(next).sessions[args.sid]);
+          } catch (e) { stop = e; return undefined; }         // abort: nothing is written
+        });
+        if (stop) return failure(stop);
+        if (!res.committed || !res.snapshot.exists()) return { ok: false, code: "missing", message: "Session not found." };
+        return { ok: true, result };
+      } catch (e) { return failure(e); }
+    }
+
     return {
       kind: "firebase", orgMode: open ? "open" : "account", isOrg,
       hasOrganiser: () => Object.keys(admins).length > 0,
@@ -158,6 +191,10 @@ const Backends = (() => {
           if (sess && sess.status === "live") return type === "round.confirm" ? confirmLive(sess, args) : scoreLive(type, args, sess);
         }
         if (!isOrg()) return { ok: false, code: "pin", message: "That needs the organiser to be signed in." };
+        if (ON_SESSION.has(type)) {
+          const sess = state.sessions.find(s => s.id === args.sid);
+          if (sess && sess.status === "live") return sessionLive(type, args);
+        }
         if (type === "round.back") {       // write just that pool's round, so other pools' confirms are never overwritten
           const sess = state.sessions.find(s => s.id === args.sid), idx = sess ? sess.pools.findIndex(p => p.id === args.pool) : -1;
           if (sess && sess.status === "live" && idx >= 0 && sess.pools[idx].confirmed > 0) {
@@ -222,8 +259,16 @@ const Backends = (() => {
         } catch (e) { return { ok: false, code: "auth", message: /permission/i.test(String(e && (e.code || e.message))) ? "This league already has an organiser." : authMessage(e) }; }
       },
       signOut: () => au.signOut(auth),
-      async replaceAll(doc) {
+      /* Replacing the whole league while a session is being played wipes the scores going in on the phones, so it is
+         refused unless the organiser has been shown that and said yes (overLive). Still possible, because restoring a
+         backup can be the way out of a night that has gone wrong. */
+      async replaceAll(doc, opts) {
         if (!isOrg()) return { ok: false, code: "pin", message: "That needs the organiser to be signed in." };
+        const live = state.sessions.find(s => s.status === "live");
+        if (live && !(opts && opts.overLive)) {
+          const n = Object.values(live.games).filter(g => g.status === "done").length;
+          return { ok: false, code: "live", message: `A session is live${n ? ` with ${n} score${n === 1 ? "" : "s"} entered` : ""}. Loading would replace it, so it needs a second yes.` };
+        }
         try {
           const st = Ladder.normalize(doc);
           st.ratings = Ladder.compute(st);

@@ -68,6 +68,16 @@ async function act(area, type, args, okMsg) {
   return j;
 }
 
+/* A session being played right now. Loading a league file or restoring a backup replaces it, scores and all. */
+function liveNow() {
+  const s = app.st.sessions.find(x => x.status === "live");
+  return s ? { s, done: Object.values(s.games).filter(g => g.status === "done").length } : null;
+}
+function liveWarn() {
+  const l = liveNow();
+  return l ? `<p class="note warn" role="alert">⚠ <b>A session is live${l.done ? ` with ${l.done} score${l.done === 1 ? "" : "s"} entered` : ""}.</b> This replaces it too: tonight's scores go, and phones still open on it will be entering scores into a session that is no longer there. A copy of the league as it is now is kept under Backups on this device first.</p>` : "";
+}
+
 /* A second tap while the first is still being dealt with does nothing (and does not store a second backup). */
 const running = new Set();
 async function once(key, fn) {
@@ -1060,13 +1070,14 @@ function orgSettings() {
       <p class="muted">${app.be.replaceAll ? "Save a copy of everything, or load a league file. Loading replaces all players, sessions and scores." : "Save a copy of everything to this device."}</p>
       <div class="row"><button class="btn" data-act="export">Save a copy</button>
         ${app.be.replaceAll ? `<label class="btn">Load a league file<input id="importfile" type="file" accept="application/json,.json" style="position:absolute;opacity:0;width:1px;height:1px"></label>` : ""}</div>
-      ${app.importDoc ? `<div class="note"><b>${esc(app.importDoc.name)}</b>: ${app.importDoc.players} players, ${app.importDoc.sessions} sessions. This replaces everything in the league now.
-        <div class="row" style="margin-top:10px"><button class="btn primary" data-act="import">Replace the league with this file</button><button class="btn" data-act="cancel">Cancel</button></div></div>` : ""}
+      ${app.importDoc ? `<div class="note"><b>${esc(app.importDoc.name)}</b>: ${app.importDoc.players} players, ${app.importDoc.sessions} sessions. This replaces everything in the league now.${liveWarn()}
+        <div class="row" style="margin-top:10px"><button class="btn ${liveNow() ? "danger" : "primary"}" data-act="import"${liveNow() ? ' data-live="1"' : ""}>${liveNow() ? "Replace the league, live session included" : "Replace the league with this file"}</button><button class="btn" data-act="cancel">Cancel</button></div></div>` : ""}
       ${errLine("data")}</div>
     <div class="card"><h2>Backups on this device</h2>
       <p class="muted">A copy is kept here before a session is finished, reopened, reset or deleted, and before a league file is loaded. The last five are kept, on this device only.${app.be.kind === "server" ? " The laptop also saves files in its data/backups folder, and restoring on the laptop version is done from those files." : ""}</p>
       ${backups().length ? `<div class="results">${backups().map((x, i) => `<div class="res" style="grid-template-columns:1fr auto"><span class="who"><b>${new Date(x.at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</b> <span class="muted">${WHY[x.why] || ""} · ${Object.keys(x.state.sessions || {}).length} sessions</span></span>
-        ${!app.be.replaceAll ? "" : app.confirm === "restore:" + i ? `<span class="row"><button class="btn small danger" data-act="restore" data-i="${i}">Yes, replace the league with this</button><button class="btn small" data-act="cancel">Cancel</button></span>` : `<button class="btn small" data-act="ask" data-key="restore:${i}">Restore</button>`}</div>`).join("")}</div>` : '<p class="muted">No backups on this device yet.</p>'}
+        ${!app.be.replaceAll ? "" : app.confirm === "restore:" + i ? `<span class="row"><button class="btn small danger" data-act="restore" data-i="${i}"${liveNow() ? ' data-live="1"' : ""}>${liveNow() ? "Yes, replace it, live session included" : "Yes, replace the league with this"}</button><button class="btn small" data-act="cancel">Cancel</button></span>` : `<button class="btn small" data-act="ask" data-key="restore:${i}">Restore</button>`}</div>`).join("")}</div>` : '<p class="muted">No backups on this device yet.</p>'}
+      ${(app.confirm || "").startsWith("restore:") ? liveWarn() : ""}
       ${errLine("restore")}</div>`;
 }
 
@@ -1339,7 +1350,8 @@ const A = {
     const pick = backups()[+d.i]; app.confirm = null;
     if (!pick || !app.be.replaceAll) return render();
     backupLocal("restore");
-    const j = await app.be.replaceAll(pick.state);
+    const j = await app.be.replaceAll(pick.state, { overLive: !!d.live });
+    if (j.code === "live") app.confirm = "restore:" + d.i;      // a session went live since this screen was drawn: show the warning, ask again
     app.err.restore = j.ok ? "" : j.message;
     if (j.ok) toast("Backup restored");
     render();
@@ -1352,10 +1364,11 @@ const A = {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   },
-  import: async () => {
+  import: async d => {
     const doc = app.importDoc; app.importDoc = null;
     backupLocal("import");
-    const j = await app.be.replaceAll(doc.data);
+    const j = await app.be.replaceAll(doc.data, { overLive: !!d.live });
+    if (j.code === "live") app.importDoc = doc;      // a session went live since this screen was drawn: show the warning, ask again
     app.err.data = j.ok ? "" : j.message;
     if (j.ok) toast("League loaded");
     render();
