@@ -66,6 +66,14 @@ async function test(name, fn) {
 
   await test("session set-up, scoring and a stale edit", async () => {
     sid = (await ok("session.create", { date: "2026-11-30" })).id;
+    /* the organiser unticks a player: that player's answer becomes out, and nobody else's answer is touched */
+    db.write("availability/2026-11-30/p2", { v: "out", at: 9 }, true);        // a phone changed its answer; this device has not heard
+    await ok("session.attend", { sid, pid: "p1", on: false });
+    assert.deepStrictEqual([db.read("availability/2026-11-30/p1/v"), db.read("availability/2026-11-30/p1/by")], ["out", "org"]);
+    assert.deepStrictEqual([db.read("availability/2026-11-30/p2/v"), db.read("availability/2026-11-30/p2/at")], ["out", 9]);
+    await ok("session.attend", { sid, pid: "p1", on: true });
+    await ok("avail.set", { date: "2026-11-30", pid: "p2", v: "in" });
+    assert.strictEqual(db.read(`sessions/${sid}/attending`).length, 8);
     await ok("session.assign", { sid });
     await ok("session.start", { sid });
     sess = state.sessions.find(s => s.id === sid); pool = sess.pools[0];

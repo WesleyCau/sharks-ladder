@@ -417,6 +417,12 @@
       if (!p.active) fail("inactive", `${p.name} is marked as dropped out. Restore them first.`);
       if (!s.attending.includes(p.id)) s.attending.push(p.id);
     } else removeFromSession(s, p.id);
+    /* On a league night the organiser's tick is the player's answer too, so the Availability page shows what the
+       organiser knows (a player who rang to say they are out, one who turned up without answering). */
+    if (p.active && seasonOf(st).dates.includes(s.date)) {
+      st.availability = st.availability || {};
+      (st.availability[s.date] = st.availability[s.date] || {})[p.id] = { v: a.on ? "in" : "out", at: Date.now(), by: "org" };
+    }
   };
   H["session.attendAll"] = (st, a) => {
     const s = getSession(st, a.sid, "setup");

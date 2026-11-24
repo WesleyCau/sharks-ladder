@@ -314,6 +314,9 @@ const Backends = (() => {
           }
           const out = {};
           diff(toDb(base), toDb(next), "", out);
+          /* answers are always written one player at a time: a night's first answer from here must not replace
+             the first answer a phone gave a moment ago */
+          for (const k of Object.keys(out)) if (/^availability\/[^/]+$/.test(k) && isObj(out[k])) { for (const pid in out[k]) out[k + "/" + pid] = out[k][pid]; delete out[k]; }
           if (Object.keys(out).length) await db.update(db.ref(database), out);
           return { ok: true, result };
         } catch (e) { return failure(e); }

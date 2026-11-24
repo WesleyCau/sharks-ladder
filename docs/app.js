@@ -480,6 +480,21 @@ function viewIn() {
     ${nights.length > 1 && !allIn ? `<button class="btn" data-act="availall">I am in for every night left</button>` : ""}
     <p class="muted">You can change an answer any time before a night closes.</p></div>`;
 }
+/* Organiser, setting up a session: everyone to tick. On a league night the list is grouped by what each player
+   answered: In (ticked), No answer, Out (a dashed box with a cross). A tap changes the list and the player's answer. */
+function attendList(s, list, inSet) {
+  const night = availOn() && season().dates.includes(s.date), said = night ? app.st.availability[s.date] || {} : {};
+  const ans = p => (said[p.id] ? said[p.id].v : null);
+  const chip = p => {
+    const v = ans(p), on = inSet.has(p.id), odd = (v === "in" && !on) || (v === "out" && on);
+    return `<button class="chip${v === "out" ? " out" : ""}${odd ? " differs" : ""}" data-act="attend" data-sid="${s.id}" data-pid="${p.id}" aria-pressed="${on}"><i>${v === "out" && !on ? "✕" : "✓"}</i><span>${esc(p.name)}${odd ? `<small>${v === "out" ? "said out, on the list" : "said in, not on the list"}</small>` : ""}</span></button>`;
+  };
+  if (!list.length) return '<p class="muted">No player matches.</p>';
+  if (!night) return `<div class="chips">${list.map(chip).join("")}</div>`;
+  const group = (v, title, cls, note) => { const rows = list.filter(p => ans(p) === v); return rows.length ? `<h3 class="attgroup ${cls}">${title} <span class="num">(${rows.length})</span>${note ? `<small>${note}</small>` : ""}</h3><div class="chips">${rows.map(chip).join("")}</div>` : ""; };
+  return `<p class="muted">Grouped by what each player answered. A tick means on tonight's list. Tapping a player changes the list and their answer on the Availability page.</p>
+    ${group("in", "In", "", "")}${group(null, "No answer", "", "")}${group("out", "Out", "out", "not playing")}`;
+}
 /* Organiser, setting up a session: what players have said for that night, next to who is on the list. */
 function availLine(s) {
   if (!availOn() || !season().dates.includes(s.date)) return "";
@@ -1077,7 +1092,7 @@ function orgSetup(s) {
   <div class="card"><div class="row spread"><h2>1. Who is playing <span class="muted num">(${s.attending.length})</span></h2>
       <span class="row">${closedSess().length ? `<button class="btn small" data-act="attendAll" data-sid="${s.id}" data-last="1">Same as last week</button>` : ""}<button class="btn small" data-act="attendAll" data-sid="${s.id}" data-on="1">Everyone</button><button class="btn small" data-act="attendAll" data-sid="${s.id}" data-on="">No one</button></span></div>
     <input id="q" type="search" placeholder="Find a player" value="${esc(app.form.q || "")}" aria-label="Find a player">
-    <div class="chips">${active.filter(p => !q || p.name.toLowerCase().includes(q)).map(p => `<button class="chip" data-act="attend" data-sid="${s.id}" data-pid="${p.id}" aria-pressed="${inSet.has(p.id)}"><i>✓</i><span>${esc(p.name)}</span></button>`).join("") || '<p class="muted">No player matches.</p>'}</div>
+    ${attendList(s, active.filter(p => !q || p.name.toLowerCase().includes(q)), inSet)}
     <form class="row" data-form="addplayer" data-sid="${s.id}" style="align-items:flex-end">
       <label class="field">New player's name<input id="newname" type="text" autocomplete="off" value="${esc(app.form.newname || "")}"></label>
       <label class="field">Starting level${seedOptions("newseed")}</label>

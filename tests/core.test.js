@@ -384,6 +384,12 @@ test("availability: the season's nights, in and out, and a session that starts f
   assert.deepStrictEqual(sess.attending.slice().sort(), [ids[3], ids[4], ids[5], ids[7]].sort());
   assert.ok(!sess.pools.some(p => p.players.includes(ids[2])));
 
+  /* the organiser's tick is the player's answer too */
+  L.apply(st, "session.attend", { sid, pid: ids[8], on: true }, true);                                // turned up without answering
+  L.apply(st, "session.attend", { sid, pid: ids[3], on: false }, true);                               // rang to say they are out
+  assert.deepStrictEqual([st.availability[night][ids[8]].v, st.availability[night][ids[3]].v, st.availability[night][ids[3]].by], ["in", "out", "org"]);
+  assert.deepStrictEqual(L.availCount(st, night).in.slice().sort(), sess.attending.slice().sort());
+
   L.apply(st, "season.set", { dates: ["2026-12-04"], days: 0, time: "12:30", names: false }, true);
   assert.strictEqual(st.availability[night], undefined);                                              // answers go with a night taken off the calendar
   assert.deepStrictEqual(L.seasonOf(st), { dates: ["2026-12-04"], days: 0, time: "12:30", names: false });
