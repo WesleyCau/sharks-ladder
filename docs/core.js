@@ -230,10 +230,23 @@
     }
     return best.rounds;
   }
-  /* players: ids. Returns rounds: [[[pair, pair], ...], ...] using those ids. Same seed, same schedule. */
-  function generate(players, seed) {
+  /* The schedules pickleballranker has used for this league (every pool of eight in seasons five to seven, and its
+     pools of nine): one fixed set of rounds each, in a fixed order. Written by slot, 1 = the highest 4DR in the pool;
+     "18v26" is slots 1 and 8 against 2 and 6. In a nine the players sit out in slot order: slot 1 in round 1, slot 9 last.
+     Both are full whist designs. The same text is in ladder/scheduler.py. */
+  const RANKER = {
+    8: "18v26 34v57|16v45 28v37|14v38 27v56|13v67 25v48|17v24 36v58|12v35 47v68|15v78 23v46",
+    9: "23v47 59v68|13v58 49v67|12v69 48v57|17v56 29v38|19v37 28v46|18v27 39v45|14v89 26v35|16v34 25v79|15v24 36v78",
+  };
+  const rankerDesign = n => (RANKER[n] ? RANKER[n].split("|").map(rd => rd.split(" ").map(m => m.split("v").map(side => [side[0] - 1, side[1] - 1]))) : null);
+  /* players: ids. Returns rounds: [[[pair, pair], ...], ...] using those ids. Same seed, same schedule.
+     mode "ranker": eights and nines get the fixed schedule above, with the players taken in the order given (the pool's
+     own order, highest 4DR first). Any other size, or any other mode, is drawn as before. */
+  function generate(players, seed, mode) {
     const n = players.length;
     if (n < MIN_POOL || n > MAX_POOL) throw new Error(`a pool needs ${MIN_POOL} to ${MAX_POOL} players, got ${n}`);
+    const fixed = mode === "ranker" ? rankerDesign(n) : null;
+    if (fixed) return fixed.map(rd => rd.map(([[a, b], [c, d]]) => [[players[a], players[b]], [players[c], players[d]]]));
     const rand = rng(String(seed) + "-" + n);
     const design = (n === 8 && whist8()) || (n === 9 && whist9()) || balanced(n, roundCount(n), rand);
     const slots = shuffle(players.slice(), rand), order = shuffle(design.slice(), rand);
@@ -258,7 +271,7 @@
   const fail = (code, message, extra) => { throw new ActionError(code, message, extra); };
 
   function emptyState(name) {
-    return { version: 1, seq: { p: 0, s: 0, g: 0 }, league: { name: name || "Southern Sharks PC Ladder League", seeds: DEFAULT_SEEDS.slice(), poolSize: 8, pointsToWin: 11, nameStyle: "short" },
+    return { version: 1, seq: { p: 0, s: 0, g: 0 }, league: { name: name || "Southern Sharks PC Ladder League", seeds: DEFAULT_SEEDS.slice(), poolSize: 8, pointsToWin: 11, nameStyle: "short", schedule: "ranker" },
       players: {}, sessions: [], availability: {}, ratings: { current: {}, sessions: {}, games: {}, totals: {} } };
   }
   const toArray = x => (Array.isArray(x) ? x.filter(v => v != null) : x && typeof x === "object" ? Object.keys(x).sort((a, b) => a - b).map(k => x[k]) : []);
@@ -323,6 +336,7 @@
   H["league.update"] = (st, a) => {
     if ("name" in a) { const name = String(a.name).trim(); if (!name) fail("invalid", "League name cannot be empty."); st.league.name = name.slice(0, 80); }
     if ("nameStyle" in a) { if (a.nameStyle !== "short" && a.nameStyle !== "full") fail("invalid", "Choose short or full names."); st.league.nameStyle = a.nameStyle; }
+    if ("schedule" in a) { if (a.schedule !== "ranker" && a.schedule !== "mixed") fail("invalid", "Choose a schedule."); st.league.schedule = a.schedule; }
     if ("pointsToWin" in a) {
       const raw = String(a.pointsToWin).trim(), pts = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
       if (!(pts >= 5 && pts <= 21)) fail("invalid", "Points to win must be a whole number from 5 to 21.");
@@ -494,6 +508,17 @@
     autoCourts(s);
     clearSchedule(s);
   };
+  /* Two players in the same pool change places in its order. The order is the schedule slot when the league plays
+     pickleballranker's rounds, so this is how the organiser copies a pool where that site has two players the other way round. */
+  H["session.swap"] = (st, a) => {
+    const s = getSession(st, a.sid, "setup"), pool = s.pools.find(p => p.players.includes(a.a)) || fail("missing", "That player is not in a pool.");
+    const i = pool.players.indexOf(a.a), j = pool.players.indexOf(a.b);
+    if (j < 0) fail("invalid", "Both players must be in the same pool.");
+    if (i === j) fail("invalid", "Choose two different players.");
+    pool.players[i] = a.b; pool.players[j] = a.a;
+    clearSchedule(s);
+    return { pool: pool.id, slots: [i + 1, j + 1] };
+  };
   H["session.pool"] = (st, a) => {
     const s = getSession(st, a.sid, "setup", "live");
     if (a.add) { const s2 = getSession(st, a.sid, "setup"), id = String.fromCharCode(65 + s2.pools.length); s2.pools.push({ id, name: "Pool " + id, courts: 1, confirmed: 0, players: [], rounds: [] }); return; }
@@ -521,7 +546,7 @@
     s.games = {};
     for (const pool of s.pools) {
       pool.confirmed = 0;
-      pool.rounds = generate(pool.players, s.id + pool.id).map((rd, ri) => rd.map(([t1, t2]) => {
+      pool.rounds = generate(pool.players, s.id + pool.id, st.league.schedule).map((rd, ri) => rd.map(([t1, t2]) => {
         const gid = nextId(st, "g");
         s.games[gid] = { id: gid, pool: pool.id, round: ri, t1, t2, s1: null, s2: null, status: "pending" };
         return gid;
@@ -651,6 +676,6 @@
     return result;
   }
 
-  Object.assign(L, { seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
+  Object.assign(L, { RANKER, seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));

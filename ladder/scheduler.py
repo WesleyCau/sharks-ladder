@@ -107,11 +107,29 @@ def _balanced(n, n_rounds, rng):
     return best[1]
 
 
-def generate(players, seed=0):
-    """players: list of ids. Returns rounds: [[(pair, pair), ...], ...] using those ids."""
+# The schedules pickleballranker has used for this league: one fixed set of rounds for eight and for nine, by slot
+# (1 = highest 4DR in the pool). The same text as RANKER in docs/core.js.
+RANKER = {
+    8: "18v26 34v57|16v45 28v37|14v38 27v56|13v67 25v48|17v24 36v58|12v35 47v68|15v78 23v46",
+    9: "23v47 59v68|13v58 49v67|12v69 48v57|17v56 29v38|19v37 28v46|18v27 39v45|14v89 26v35|16v34 25v79|15v24 36v78",
+}
+
+
+def _ranker(n):
+    if n not in RANKER:
+        return None
+    return [[tuple((int(side[0]) - 1, int(side[1]) - 1) for side in m.split("v")) for m in rd.split(" ")] for rd in RANKER[n].split("|")]
+
+
+def generate(players, seed=0, mode=None):
+    """players: list of ids. Returns rounds: [[(pair, pair), ...], ...] using those ids.
+    mode "ranker": eights and nines get pickleballranker's fixed rounds, players taken in the order given."""
     n = len(players)
     if not MIN_POOL <= n <= MAX_POOL:
         raise ValueError("a pool needs %d to %d players, got %d" % (MIN_POOL, MAX_POOL, n))
+    fixed = _ranker(n) if mode == "ranker" else None
+    if fixed:
+        return [[((players[a], players[b]), (players[c], players[d])) for (a, b), (c, d) in rd] for rd in fixed]
     rng = random.Random("%s-%d" % (seed, n))
     design = _whist8() if n == 8 else _whist9() if n == 9 else None
     if design is None:

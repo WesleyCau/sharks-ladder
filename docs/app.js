@@ -1121,9 +1121,12 @@ function orgSetup(s) {
     }).join("")}</div>
     ${errLine("pools")}</div>
 
-  ${sel ? `<div class="movebar" role="group" aria-label="Move player"><b>Move ${esc(nm(sel))} to</b>
+  ${sel && app.swap && s.pools.some(p => p.players.includes(sel)) ? `<div class="movebar" role="group" aria-label="Swap slots"><b>Swap ${esc(nm(sel))} with</b>
+    <div class="row">${s.pools.find(p => p.players.includes(sel)).players.map((id, i) => (id === sel ? "" : `<button class="btn" data-act="swap" data-sid="${s.id}" data-a="${sel}" data-b="${id}"><span class="muted num">${i + 1}</span> ${esc(app.short[id] || nm(id))}</button>`)).join("")}
+      <button class="btn" data-act="cancel">Cancel</button></div></div>`
+  : sel ? `<div class="movebar" role="group" aria-label="Move player"><b>Move ${esc(nm(sel))} to</b>
     <div class="row">${s.pools.map(p => `<button class="btn" data-act="move" data-sid="${s.id}" data-pid="${sel}" data-to="${p.id}" ${p.players.includes(sel) ? "disabled" : ""}>${esc(p.name)}</button>`).join("")}
-      <button class="btn" data-act="attend" data-sid="${s.id}" data-pid="${sel}" data-off="1">Not playing</button><button class="btn" data-act="cancel">Cancel</button></div></div>` : ""}
+      ${s.pools.some(p => p.players.includes(sel)) ? `<button class="btn" data-act="swapask">Swap slots with…</button>` : ""}<button class="btn" data-act="attend" data-sid="${s.id}" data-pid="${sel}" data-off="1">Not playing</button><button class="btn" data-act="cancel">Cancel</button></div></div>` : ""}
 
   <div class="card"><h2>3. Start</h2>
     <p class="muted">Starting creates each pool's schedule. A pool of eight plays 7 rounds: everyone partners everyone once. A pool of nine plays 9 rounds, with one player sitting out each round.</p>
@@ -1208,6 +1211,8 @@ function orgSettings() {
       <div class="row" style="align-items:flex-end"><label class="field">League name<input id="lname" type="text" value="${esc(app.form.lname ?? lg.name)}"></label>
       <label class="field">Points to win a game<input id="lpts" type="number" min="5" max="21" value="${esc(app.form.lpts ?? lg.pointsToWin)}"></label>
       <button class="btn primary" type="submit">Save</button></div>${errLine("league")}
+      <div class="row spread"><span><b>Rounds for pools of eight and nine</b><br><span class="muted">Same as pickleballranker: fixed rounds in a fixed order, slots by 4DR. Mixed: partners and order drawn afresh each night.</span></span>
+        <span class="seg" role="group" aria-label="Rounds for pools of eight and nine">${[["ranker", "Same as pickleballranker"], ["mixed", "Mixed each night"]].map(([k, l]) => `<button type="button" data-act="schedule" data-mode="${k}" aria-pressed="${(lg.schedule || "ranker") === k}">${l}</button>`).join("")}</span></div>
       <div class="row spread"><span><b>Names on match screens</b><br><span class="muted">The ratings list, player pages and the roster always show full names.</span></span>
         <span class="seg" role="group" aria-label="Names on match screens">${[["short", "First name + initial"], ["full", "Full names"]].map(([k, l]) => `<button type="button" data-act="nameStyle" data-style="${k}" aria-pressed="${(lg.nameStyle || "short") === k}">${l}</button>`).join("")}</span></div></form>
     ${seasonCard()}
@@ -1551,7 +1556,10 @@ const A = {
   attend: d => { if (d.off) app.sel = null; const s = sessById(d.sid); return act("attend", "session.attend", { sid: d.sid, pid: d.pid, on: d.off ? false : !(s && s.attending.includes(d.pid)) }); },
   attendAll: d => { app.sel = null; return act("attend", "session.attendAll", d.last ? { sid: d.sid, last: true } : { sid: d.sid, on: !!d.on }, d.last ? "Same players as last week" : ""); },
   assign: d => { app.sel = null; app.confirm = null; return act("pools", "session.assign", d.pools ? { sid: d.sid, pools: +d.pools } : { sid: d.sid }); },
-  pick: d => { app.sel = app.sel === d.pid ? null : d.pid; render(); },
+  pick: d => { app.sel = app.sel === d.pid ? null : d.pid; app.swap = false; render(); },
+  swapask: () => { app.swap = true; render(); },
+  swap: d => { app.sel = null; app.swap = false; return act("pools", "session.swap", { sid: d.sid, a: d.a, b: d.b }, "Slots swapped"); },
+  schedule: d => act("league", "league.update", { schedule: d.mode }),
   move: d => { app.sel = null; return act("pools", "session.move", { sid: d.sid, pid: d.pid, to: d.to }); },
   courts: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, courts: +d.courts }),
   ptarget: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, target: d.target === "auto" ? "auto" : +d.target }),

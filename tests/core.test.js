@@ -401,4 +401,38 @@ test("availability: the season's nights, in and out, and a session that starts f
   assert.strictEqual(plain.sessions[0].attending.length, 8);
 });
 
+test("eights and nines play pickleballranker's rounds, slots in pool order", () => {
+  const eight = Array.from({ length: 8 }, (_, i) => String(i + 1)), nine = Array.from({ length: 9 }, (_, i) => String(i + 1));
+  const show = rounds => rounds.map(rd => rd.map(([a, b]) => a.join("") + "v" + b.join("")).join(" ")).join("|");
+  const r8 = L.generate(eight, "any", "ranker"), r9 = L.generate(nine, "other", "ranker");
+  assert.strictEqual(show(r8), "18v26 34v57|16v45 28v37|14v38 27v56|13v67 25v48|17v24 36v58|12v35 47v68|15v78 23v46");
+  assert.strictEqual(show(r9), "23v47 59v68|13v58 49v67|12v69 48v57|17v56 29v38|19v37 28v46|18v27 39v45|14v89 26v35|16v34 25v79|15v24 36v78");
+  assert.deepStrictEqual(L.generate(eight, "a different night", "ranker"), r8);                       // the same every night
+  let s = L.summary(eight, r8);
+  assert.deepStrictEqual([s.rounds, s.partnerMin, s.partnerMax, s.opposeMin, s.opposeMax], [7, 1, 1, 2, 2]);
+  s = L.summary(nine, r9);
+  assert.deepStrictEqual([s.rounds, s.partnerMin, s.partnerMax, s.opposeMin, s.opposeMax], [9, 1, 1, 2, 2]);
+  assert.deepStrictEqual(r9.map(rd => nine.find(p => !rd.flat(2).includes(p))), nine);                // slot 1 sits out round 1, slot 9 the last
+  assert.notDeepStrictEqual(L.generate(eight, "any", "mixed"), r8);
+  assert.strictEqual(L.generate(Array.from({ length: 10 }, (_, i) => "p" + i), "x", "ranker").length, L.roundCount(10));   // other sizes as before
+
+  /* through a session: the pool's order is the slot order, and the organiser can swap two slots */
+  const st = league(8);
+  assert.strictEqual(st.league.schedule, "ranker");
+  const sid = L.apply(st, "session.create", { date: "2026-11-27" }, true).id, sess = st.sessions[0];
+  L.apply(st, "session.assign", { sid }, true);
+  const before = sess.pools[0].players.slice();
+  throwsCode(() => L.apply(st, "session.swap", { sid, a: before[0], b: before[7] }, false), "pin");
+  assert.deepStrictEqual(L.apply(st, "session.swap", { sid, a: before[4], b: before[5] }, true).slots, [5, 6]);
+  throwsCode(() => L.apply(st, "session.swap", { sid, a: before[0], b: before[0] }, true), "invalid");
+  const order = sess.pools[0].players.slice();
+  assert.deepStrictEqual([order[4], order[5]], [before[5], before[4]]);
+  L.apply(st, "session.start", { sid }, true);
+  const first = sess.pools[0].rounds[0].map(gid => sess.games[gid]), slot = id => order.indexOf(id) + 1;
+  assert.strictEqual(first.map(g => g.t1.map(slot).join("") + "v" + g.t2.map(slot).join("")).join(" "), "18v26 34v57");
+  L.apply(st, "session.unstart", { sid }, true);
+  L.apply(st, "league.update", { schedule: "mixed" }, true);
+  throwsCode(() => L.apply(st, "league.update", { schedule: "random" }, true), "invalid");
+});
+
 console.log(`${passed} passed`);
