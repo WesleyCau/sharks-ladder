@@ -98,6 +98,10 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(show(r8), scheduler.RANKER[8])
         self.assertEqual(show(r9), scheduler.RANKER[9])
         self.assertEqual(scheduler.generate(eight, seed="another night", mode="ranker"), r8)
+        self.assertEqual(scheduler.generate(eight, mode="closest"), [r8[k - 1] for k in (1, 3, 5, 4, 6, 7, 2)])
+        self.assertEqual(scheduler.generate(nine, mode="closest"), [r9[k - 1] for k in (9, 3, 1, 2, 4, 7, 6, 8, 5)])
+        self.assertIn("const CLOSEST = { 8: [1, 3, 5, 4, 6, 7, 2], 9: [9, 3, 1, 2, 4, 7, 6, 8, 5] };",
+                      open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "core.js"), encoding="utf-8").read())
         for players, rounds, n in ((eight, r8, 7), (nine, r9, 9)):
             s = scheduler.summary(players, rounds)
             self.assertEqual((s["rounds"], s["partner_min"], s["partner_max"], s["oppose_min"], s["oppose_max"]), (n, 1, 1, 2, 2))

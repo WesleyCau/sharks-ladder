@@ -238,14 +238,20 @@
     8: "18v26 34v57|16v45 28v37|14v38 27v56|13v67 25v48|17v24 36v58|12v35 47v68|15v78 23v46",
     9: "23v47 59v68|13v58 49v67|12v69 48v57|17v56 29v38|19v37 28v46|18v27 39v45|14v89 26v35|16v34 25v79|15v24 36v78",
   };
+  /* The same games in a different order of rounds (numbers are pickleballranker's round numbers): the closest round is
+     played last, the two most one-sided rounds are kept apart, and nobody is a heavy underdog in two games running.
+     Worked out from typical 4DR by slot over seasons five to seven. It changes the night, not the ratings. */
+  const CLOSEST = { 8: [1, 3, 5, 4, 6, 7, 2], 9: [9, 3, 1, 2, 4, 7, 6, 8, 5] };
   const rankerDesign = n => (RANKER[n] ? RANKER[n].split("|").map(rd => rd.split(" ").map(m => m.split("v").map(side => [side[0] - 1, side[1] - 1]))) : null);
   /* players: ids. Returns rounds: [[[pair, pair], ...], ...] using those ids. Same seed, same schedule.
      mode "ranker": eights and nines get the fixed schedule above, with the players taken in the order given (the pool's
-     own order, highest 4DR first). Any other size, or any other mode, is drawn as before. */
+     own order, highest 4DR first). mode "closest": the same games, rounds in the CLOSEST order.
+     Any other size, or any other mode, is drawn as before. */
   function generate(players, seed, mode) {
     const n = players.length;
     if (n < MIN_POOL || n > MAX_POOL) throw new Error(`a pool needs ${MIN_POOL} to ${MAX_POOL} players, got ${n}`);
-    const fixed = mode === "ranker" ? rankerDesign(n) : null;
+    const base = mode === "ranker" || mode === "closest" ? rankerDesign(n) : null;
+    const fixed = base && mode === "closest" ? CLOSEST[n].map(k => base[k - 1]) : base;
     if (fixed) return fixed.map(rd => rd.map(([[a, b], [c, d]]) => [[players[a], players[b]], [players[c], players[d]]]));
     const rand = rng(String(seed) + "-" + n);
     const design = (n === 8 && whist8()) || (n === 9 && whist9()) || balanced(n, roundCount(n), rand);
@@ -336,7 +342,12 @@
   H["league.update"] = (st, a) => {
     if ("name" in a) { const name = String(a.name).trim(); if (!name) fail("invalid", "League name cannot be empty."); st.league.name = name.slice(0, 80); }
     if ("nameStyle" in a) { if (a.nameStyle !== "short" && a.nameStyle !== "full") fail("invalid", "Choose short or full names."); st.league.nameStyle = a.nameStyle; }
-    if ("schedule" in a) { if (a.schedule !== "ranker" && a.schedule !== "mixed") fail("invalid", "Choose a schedule."); st.league.schedule = a.schedule; }
+    if ("schedule" in a) { if (!["ranker", "closest", "mixed"].includes(a.schedule)) fail("invalid", "Choose a schedule.");
+      /* a session still being set up is drawn again under the new choice the next time it is scheduled or started */
+      const open = openSession(st);
+      if (a.schedule !== st.league.schedule && open && open.status === "setup") clearSchedule(open);
+      st.league.schedule = a.schedule;
+    }
     if ("pointsToWin" in a) {
       const raw = String(a.pointsToWin).trim(), pts = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
       if (!(pts >= 5 && pts <= 21)) fail("invalid", "Points to win must be a whole number from 5 to 21.");
@@ -676,6 +687,6 @@
     return result;
   }
 
-  Object.assign(L, { RANKER, seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
+  Object.assign(L, { RANKER, CLOSEST, seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));

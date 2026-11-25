@@ -115,6 +115,10 @@ RANKER = {
 }
 
 
+# The same games with the rounds reordered (pickleballranker's round numbers): closest round last. As CLOSEST in docs/core.js.
+CLOSEST = {8: [1, 3, 5, 4, 6, 7, 2], 9: [9, 3, 1, 2, 4, 7, 6, 8, 5]}
+
+
 def _ranker(n):
     if n not in RANKER:
         return None
@@ -123,11 +127,14 @@ def _ranker(n):
 
 def generate(players, seed=0, mode=None):
     """players: list of ids. Returns rounds: [[(pair, pair), ...], ...] using those ids.
-    mode "ranker": eights and nines get pickleballranker's fixed rounds, players taken in the order given."""
+    mode "ranker": eights and nines get pickleballranker's fixed rounds, players taken in the order given.
+    mode "closest": the same games, rounds in the CLOSEST order."""
     n = len(players)
     if not MIN_POOL <= n <= MAX_POOL:
         raise ValueError("a pool needs %d to %d players, got %d" % (MIN_POOL, MAX_POOL, n))
-    fixed = _ranker(n) if mode == "ranker" else None
+    fixed = _ranker(n) if mode in ("ranker", "closest") else None
+    if fixed and mode == "closest":
+        fixed = [fixed[k - 1] for k in CLOSEST[n]]
     if fixed:
         return [[((players[a], players[b]), (players[c], players[d])) for (a, b), (c, d) in rd] for rd in fixed]
     rng = random.Random("%s-%d" % (seed, n))

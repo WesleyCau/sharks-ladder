@@ -414,6 +414,12 @@ test("eights and nines play pickleballranker's rounds, slots in pool order", () 
   assert.deepStrictEqual([s.rounds, s.partnerMin, s.partnerMax, s.opposeMin, s.opposeMax], [9, 1, 1, 2, 2]);
   assert.deepStrictEqual(r9.map(rd => nine.find(p => !rd.flat(2).includes(p))), nine);                // slot 1 sits out round 1, slot 9 the last
   assert.notDeepStrictEqual(L.generate(eight, "any", "mixed"), r8);
+  /* "closest": the same games, the closest round last */
+  const c8 = L.generate(eight, "any", "closest"), c9 = L.generate(nine, "any", "closest");
+  assert.deepStrictEqual(c8, [1, 3, 5, 4, 6, 7, 2].map(k => r8[k - 1]));
+  assert.deepStrictEqual(c9, [9, 3, 1, 2, 4, 7, 6, 8, 5].map(k => r9[k - 1]));
+  assert.strictEqual(show([c8[6]]), "16v45 28v37");
+  assert.deepStrictEqual(c9.map(rd => nine.find(p => !rd.flat(2).includes(p))), ["9", "3", "1", "2", "4", "7", "6", "8", "5"]);
   assert.strictEqual(L.generate(Array.from({ length: 10 }, (_, i) => "p" + i), "x", "ranker").length, L.roundCount(10));   // other sizes as before
 
   /* through a session: the pool's order is the slot order, and the organiser can swap two slots */
@@ -430,6 +436,10 @@ test("eights and nines play pickleballranker's rounds, slots in pool order", () 
   L.apply(st, "session.start", { sid }, true);
   const first = sess.pools[0].rounds[0].map(gid => sess.games[gid]), slot = id => order.indexOf(id) + 1;
   assert.strictEqual(first.map(g => g.t1.map(slot).join("") + "v" + g.t2.map(slot).join("")).join(" "), "18v26 34v57");
+  L.apply(st, "session.unstart", { sid }, true);
+  L.apply(st, "league.update", { schedule: "closest" }, true);
+  L.apply(st, "session.start", { sid }, true);
+  assert.strictEqual(sess.pools[0].rounds[6].map(gid => sess.games[gid]).map(g => g.t1.map(slot).join("") + "v" + g.t2.map(slot).join("")).join(" "), "16v45 28v37");
   L.apply(st, "session.unstart", { sid }, true);
   L.apply(st, "league.update", { schedule: "mixed" }, true);
   throwsCode(() => L.apply(st, "league.update", { schedule: "random" }, true), "invalid");

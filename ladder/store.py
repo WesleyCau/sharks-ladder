@@ -221,8 +221,11 @@ class Store:
                 raise ActionError("invalid", "Choose short or full names.")
             lg["nameStyle"] = a["nameStyle"]
         if "schedule" in a:
-            if a["schedule"] not in ("ranker", "mixed"):
+            if a["schedule"] not in ("ranker", "closest", "mixed"):
                 raise ActionError("invalid", "Choose a schedule.")
+            sess = self._open_session()
+            if a["schedule"] != lg.get("schedule", "ranker") and sess and sess["status"] == "setup":
+                self._clear_schedule(sess)      # drawn again under the new choice
             lg["schedule"] = a["schedule"]
         if "pointsToWin" in a:
             raw = str(a["pointsToWin"]).strip()

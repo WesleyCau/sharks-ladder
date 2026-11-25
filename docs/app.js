@@ -1211,8 +1211,8 @@ function orgSettings() {
       <div class="row" style="align-items:flex-end"><label class="field">League name<input id="lname" type="text" value="${esc(app.form.lname ?? lg.name)}"></label>
       <label class="field">Points to win a game<input id="lpts" type="number" min="5" max="21" value="${esc(app.form.lpts ?? lg.pointsToWin)}"></label>
       <button class="btn primary" type="submit">Save</button></div>${errLine("league")}
-      <div class="row spread"><span><b>Rounds for pools of eight and nine</b><br><span class="muted">Same as pickleballranker: fixed rounds in a fixed order, slots by 4DR. Mixed: partners and order drawn afresh each night.</span></span>
-        <span class="seg" role="group" aria-label="Rounds for pools of eight and nine">${[["ranker", "Same as pickleballranker"], ["mixed", "Mixed each night"]].map(([k, l]) => `<button type="button" data-act="schedule" data-mode="${k}" aria-pressed="${(lg.schedule || "ranker") === k}">${l}</button>`).join("")}</span></div>
+      <div class="row spread"><span><b>Rounds for pools of eight and nine</b><br><span class="muted">Old site's order: pickleballranker's fixed rounds in its order, slots by 4DR. Closest last: the same games, reordered so the night ends on its closest round. Mixed: drawn afresh each night.</span></span>
+        <span class="seg slim" role="group" aria-label="Rounds for pools of eight and nine">${[["ranker", "Old site's order"], ["closest", "Closest last"], ["mixed", "Mixed"]].map(([k, l]) => `<button type="button" data-act="schedule" data-mode="${k}" aria-pressed="${(lg.schedule || "ranker") === k}">${l}</button>`).join("")}</span></div>
       <div class="row spread"><span><b>Names on match screens</b><br><span class="muted">The ratings list, player pages and the roster always show full names.</span></span>
         <span class="seg" role="group" aria-label="Names on match screens">${[["short", "First name + initial"], ["full", "Full names"]].map(([k, l]) => `<button type="button" data-act="nameStyle" data-style="${k}" aria-pressed="${(lg.nameStyle || "short") === k}">${l}</button>`).join("")}</span></div></form>
     ${seasonCard()}
