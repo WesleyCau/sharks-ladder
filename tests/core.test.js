@@ -445,4 +445,31 @@ test("eights and nines play pickleballranker's rounds, slots in pool order", () 
   throwsCode(() => L.apply(st, "league.update", { schedule: "random" }, true), "invalid");
 });
 
+test("ratings as played: each game in order, as the old site; the setting re-rates the season both ways", () => {
+  const st = L.emptyState("T");
+  assert.strictEqual(st.league.rating, "average");
+  for (let i = 0; i < 9; i++) L.apply(st, "player.add", { name: "P" + i, seed: 3.5 }, true);
+  const sid = L.apply(st, "session.create", { date: "2026-10-16" }, true).id, sess = st.sessions[0];
+  /* the first three games of the old site's season, by hand: round 1 from level ratings, round 2 on what round 1 left */
+  sess.pools = [{ id: "A", name: "Pool A", players: Object.keys(st.players), rounds: [["g1", "g2"], ["g3"]], confirmed: 2, courts: 2 }];
+  const g = (id, t1, t2, s1, s2) => ({ id, pool: "A", round: 0, t1, t2, s1, s2, status: "done" });
+  sess.games = { g1: g("g1", ["p1", "p2"], ["p3", "p4"], 11, 3), g2: g("g2", ["p5", "p6"], ["p7", "p8"], 11, 6), g3: g("g3", ["p9", "p6"], ["p4", "p2"], 0, 11) };
+  sess.status = "closed";
+  const avg = L.compute(st);
+  L.apply(st, "league.update", { rating: "average" }, true);                       // no change: nothing to work out
+  throwsCode(() => L.apply(st, "league.update", { rating: "elo" }, true), "invalid");
+  throwsCode(() => L.apply(st, "league.update", { rating: "played" }, false), "pin");
+  L.apply(st, "league.update", { rating: "played" }, true);
+  assert.strictEqual(st.league.rating, "played");
+  const cur = st.ratings.current;
+  assert.deepStrictEqual(["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"].map(p => cur[p]), [3558, 3624, 3453, 3519, 3555, 3500, 3456, 3456, 3445]);
+  assert.deepStrictEqual(st.ratings.games.g1, { p1: 0.5, d1: 58, d2: -47 });
+  assert.deepStrictEqual(st.ratings.games.g3, { p1: 0.5493, d1: -55, d2: 66 });      // the old site shows the winners on 45.07%, +0.066, -0.055
+  assert.strictEqual(st.ratings.sessions[sid].p2.start, 3500);
+  assert.strictEqual(st.ratings.sessions[sid].p2.end, 3624);
+  assert.notDeepStrictEqual(avg.current, cur);                                      // the average of both orders is something else
+  L.apply(st, "league.update", { rating: "average" }, true);
+  assert.deepStrictEqual(st.ratings, avg);
+});
+
 console.log(`${passed} passed`);

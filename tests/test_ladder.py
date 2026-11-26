@@ -32,9 +32,16 @@ class EngineTest(unittest.TestCase):
         self.assertGreaterEqual(len(weekly), 188)
         wrong = [(w["date"], w["player"]) for w in weekly if nights[by_date[w["date"]]][ids[w["player"]]] != int(round(float(w["end"]) * 1000))]
         self.assertEqual(wrong, [])
+        # the same through the league setting: rated "as played", the site shows the published figures exactly
+        state["league"]["rating"] = "played"
+        as_played = engine.compute(state)
+        wrong = [(w["date"], w["player"]) for w in weekly if as_played["sessions"][by_date[w["date"]]][ids[w["player"]]]["end"] != int(round(float(w["end"]) * 1000))]
+        self.assertEqual(wrong, [])
+        state["league"]["rating"] = "average"
         # the site's own figures are rounded per game; the order-neutral ratings stay close to them
         with open(os.path.join(importer.SOURCE, "ratings.csv"), encoding="utf-8") as f:
             published = {r["Player"]: int(round(float(r["4DR"]) * 1000)) for r in csv.DictReader(f)}
+        self.assertEqual({n: as_played["current"][ids[n]] for n in published}, published)
         current = state["ratings"]["current"]
         self.assertEqual(len(current), len(published))
         self.assertLess(max(abs(current[ids[n]] - v) for n, v in published.items()), 60)

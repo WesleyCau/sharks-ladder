@@ -240,7 +240,7 @@ const Backends = (() => {
          Anything that re-rates the league (finishing, reopening, correcting an old score) gets 90: this device works the
          ratings out itself, and on a phone that alone can pass 12 seconds, which would report a failure that was not one. */
       send(type, args) {
-        const heavy = type === "session.close" || type === "session.reopen" || !!(args && args.history);
+        const heavy = type === "session.close" || type === "session.reopen" || !!(args && args.history) || (type === "league.update" && !!args && "rating" in args);
         if (!connected) return Promise.resolve(Object.assign({}, OFFLINE));
         /* with no organiser login, a refusal from the database means this device has not shown it the league code */
         return timed(this.sendNow(type, args), heavy ? 90000 : 12000).then(j => (j && j.refused && open ? Object.assign({}, codeNeeded) : j));

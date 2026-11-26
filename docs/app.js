@@ -628,7 +628,9 @@ function ratingBoard(last, hist) {
   const poolOf = id => { const p = last && last.pools.find(q => q.players.includes(id)); return p ? p.name : ""; };
   const lastDay = last ? sessLabels()[last.id] : "";
   return `<p class="muted">All ${ids.length} players after ${games} games. The tick marks where a player was seeded and the dot is their 4DR now, so the line between them is how far they have moved. Tap a player for their full record.</p>
-    <p class="muted small">4DR here uses the club's per-game formula, with each night averaged over every order its rounds could have been played in, so a result counts the same whenever it happened. It can differ by a few hundredths from the play-order figure on pickleballranker. This site is a prototype for next season, loaded with Season 7's results.</p>
+    <p class="muted small">${app.st.league.rating === "played"
+      ? "4DR here uses the club's per-game formula, each game counted in the order it was played: the same method as pickleballranker."
+      : "4DR here uses the club's per-game formula, with each night averaged over every order its rounds could have been played in, so a result counts the same whenever it happened. It can differ by a few hundredths from the play-order figure on pickleballranker."} This site is a prototype for next season, loaded with Season 7's results.</p>
     <input id="rq" type="search" placeholder="Find a player" value="${esc(app.form.rq || "")}" aria-label="Find a player">
     ${find && !shownIds.length ? '<p class="muted">No player matches.</p>' : ""}
     <div class="card"><div class="blegend">${seeds.map((x, i) => `<span class="lv${Math.min(3, i)}"><i class="psw"></i>${levelName(i)} start (${(x / 1000).toFixed(1)})</span>`).join("")}<span><i class="tk"></i>Seed</span></div>
@@ -795,7 +797,7 @@ function viewPlayer(pid) {
         <div class="sub off"><b class="sb-a">Start</b><span class="sb-b num">seeded <b>${fmt(p.seed)}</b></span></div></div></details>` : '<p class="muted">No games played yet.</p>'}
     ${people(partners, "partners", "Partners", "with")}
     ${people(rivals, "opponents", "Opponents", "against")}
-    ${done.some(x => x.prob !== null) ? '<p class="muted small">The chance beside a game is what the ratings gave this pair going into it, and the ▲ ▼ figure is what the game was worth, both averaged over every order the night\'s rounds could have been played in.</p>' : ""}`;
+    ${done.some(x => x.prob !== null) ? `<p class="muted small">The chance beside a game is what the ratings gave this pair going into it, and the ▲ ▼ figure is what the game was worth${app.st.league.rating === "played" ? "" : ", both averaged over every order the night's rounds could have been played in"}.</p>` : ""}`;
 }
 
 /* ---------- Rating history ---------- */
@@ -1213,6 +1215,8 @@ function orgSettings() {
       <button class="btn primary" type="submit">Save</button></div>${errLine("league")}
       <div class="row spread"><span><b>Rounds for pools of eight and nine</b><br><span class="muted">Old site's order: pickleballranker's fixed rounds in its order, slots by 4DR. Closest last: the same games, reordered so the night ends on its closest round. Mixed: drawn afresh each night.</span></span>
         <span class="seg slim" role="group" aria-label="Rounds for pools of eight and nine">${[["ranker", "Old site's order"], ["closest", "Closest last"], ["mixed", "Mixed"]].map(([k, l]) => `<button type="button" data-act="schedule" data-mode="${k}" aria-pressed="${(lg.schedule || "ranker") === k}">${l}</button>`).join("")}</span></div>
+      <div class="row spread"><span><b>How 4DR is worked out</b><br><span class="muted">As played: each game counts in the order it was played, the same as pickleballranker. Every order: each night is averaged over every order its rounds could have been played in. Switching re-rates the whole season; pools already assigned stay as they are.</span></span>
+        <span class="seg slim" role="group" aria-label="How 4DR is worked out">${[["played", "As played"], ["average", "Every order"]].map(([k, l]) => `<button type="button" data-act="ratingMode" data-mode="${k}" aria-pressed="${(app.rerating || lg.rating || "average") === k}" ${app.rerating ? "disabled" : ""}>${app.rerating === k ? "Working…" : l}</button>`).join("")}</span></div>
       <div class="row spread"><span><b>Names on match screens</b><br><span class="muted">The ratings list, player pages and the roster always show full names.</span></span>
         <span class="seg" role="group" aria-label="Names on match screens">${[["short", "First name + initial"], ["full", "Full names"]].map(([k, l]) => `<button type="button" data-act="nameStyle" data-style="${k}" aria-pressed="${(lg.nameStyle || "short") === k}">${l}</button>`).join("")}</span></div></form>
     ${seasonCard()}
@@ -1560,6 +1564,13 @@ const A = {
   swapask: () => { app.swap = true; render(); },
   swap: d => { app.sel = null; app.swap = false; return act("pools", "session.swap", { sid: d.sid, a: d.a, b: d.b }, "Slots swapped"); },
   schedule: d => act("league", "league.update", { schedule: d.mode }),
+  ratingMode: d => once("ratingMode", async () => {
+    if ((app.st.league.rating || "average") === d.mode) return;
+    app.rerating = d.mode; render();
+    await new Promise(r => setTimeout(r, 40));      // let "Working…" reach the screen: this device works the season out again itself
+    try { await act("league", "league.update", { rating: d.mode }, "Ratings worked out again"); } finally { app.rerating = null; }
+    render();
+  }),
   move: d => { app.sel = null; return act("pools", "session.move", { sid: d.sid, pid: d.pid, to: d.to }); },
   courts: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, courts: +d.courts }),
   ptarget: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, target: d.target === "auto" ? "auto" : +d.target }),

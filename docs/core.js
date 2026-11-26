@@ -102,7 +102,26 @@
     return out;
   }
 
+  /* The same rounds played once, in the order given: pickleballranker's own method. Same shape of answer as allOrders. */
+  function playedOrder(start, rounds) {
+    const r = {}, out = { ends: r, games: {} };
+    for (const rd of rounds) for (const g of rd) for (const p of g.win.concat(g.lose)) if (!(p in r)) r[p] = start[p];
+    for (const rd of rounds) for (const g of rd) {
+      const prob = 1 / (1 + Math.exp(-K_PROB * (r[g.win[0]] + r[g.win[1]] - r[g.lose[0]] - r[g.lose[1]]) / 2000));
+      const e = 10000 - Math.floor(prob * 10000 + 0.5);                                          // the club's rounding, as in allOrders
+      const dw = Math.floor((e + 50) / 100) + g.ws - g.ls, dl = g.ls - Math.floor((e + 49) / 100);
+      for (const p of g.win) r[p] += dw;
+      for (const p of g.lose) r[p] += dl;
+      out.games[g.gid] = [prob, dw, dl];
+    }
+    return out;
+  }
+
+  /* league.rating: "average" (each night averaged over every order of its rounds) or "played" (each game in the order
+     it was played, which gives the figures pickleballranker publishes). */
+  const RATINGS = ["average", "played"];
   function compute(state) {
+    const played = (state.league || {}).rating === "played";
     const rating = {}, totals = {};
     for (const pid in state.players) { rating[pid] = state.players[pid].seed; totals[pid] = { w: 0, l: 0, pf: 0, pa: 0 }; }
     const bySession = {}, gameOut = {};
@@ -124,7 +143,7 @@
         /* The score bonus is written for a game to 11. A longer game is scaled back to that, so it is worth the same. */
         const T = pool.target || sess.pointsToWin || BONUS_BASE, scale = v => (T === BONUS_BASE ? v : Math.floor((2 * BONUS_BASE * v + T) / (2 * T)));
         const rated = rounds.map(rd => rd.map(g => { const bl = scale(g.ls), bw = scale(g.ws - g.ls); return { gid: g.gid, win: g.win, lose: g.lose, ws: bw + bl, ls: bl }; }));
-        const res = allOrders(start, rated);
+        const res = played ? playedOrder(rating, rated) : allOrders(start, rated);
         for (const pid in res.ends) {
           rating[pid] = rnd(res.ends[pid]);
           rec[pid] = { pool: pool.id, start: start[pid], end: rating[pid], w: 0, l: 0, pf: 0, pa: 0 };
@@ -277,7 +296,7 @@
   const fail = (code, message, extra) => { throw new ActionError(code, message, extra); };
 
   function emptyState(name) {
-    return { version: 1, seq: { p: 0, s: 0, g: 0 }, league: { name: name || "Southern Sharks PC Ladder League", seeds: DEFAULT_SEEDS.slice(), poolSize: 8, pointsToWin: 11, nameStyle: "short", schedule: "ranker" },
+    return { version: 1, seq: { p: 0, s: 0, g: 0 }, league: { name: name || "Southern Sharks PC Ladder League", seeds: DEFAULT_SEEDS.slice(), poolSize: 8, pointsToWin: 11, nameStyle: "short", schedule: "ranker", rating: "average" },
       players: {}, sessions: [], availability: {}, ratings: { current: {}, sessions: {}, games: {}, totals: {} } };
   }
   const toArray = x => (Array.isArray(x) ? x.filter(v => v != null) : x && typeof x === "object" ? Object.keys(x).sort((a, b) => a - b).map(k => x[k]) : []);
@@ -347,6 +366,12 @@
       const open = openSession(st);
       if (a.schedule !== st.league.schedule && open && open.status === "setup") clearSchedule(open);
       st.league.schedule = a.schedule;
+    }
+    if ("rating" in a) {
+      if (!RATINGS.includes(a.rating)) fail("invalid", "Choose how ratings are worked out.");
+      const was = st.league.rating || "average";
+      st.league.rating = a.rating;
+      if (a.rating !== was) recompute(st);      // the whole season again, under the other method
     }
     if ("pointsToWin" in a) {
       const raw = String(a.pointsToWin).trim(), pts = /^\d+$/.test(raw) ? parseInt(raw, 10) : NaN;
@@ -687,6 +712,6 @@
     return result;
   }
 
-  Object.assign(L, { RANKER, CLOSEST, seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
+  Object.assign(L, { RANKER, CLOSEST, RATINGS, playedOrder, seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));

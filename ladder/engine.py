@@ -220,8 +220,27 @@ def play_order(state):
     return out
 
 
+def played_order(start, rounds):
+    """The rounds played once, in the order given (pickleballranker's method). Same shape of answer as all_orders."""
+    r, games = {}, {}
+    for rd in rounds:
+        for gid, win, lose, ws, ls in rd:
+            for pid in win + lose:
+                r.setdefault(pid, start[pid])
+            prob = 1 / (1 + math.exp(-K_PROB * (r[win[0]] + r[win[1]] - r[lose[0]] - r[lose[1]]) / 2000))
+            dw, dl = step(prob, ws, ls)
+            for pid in win:
+                r[pid] += dw
+            for pid in lose:
+                r[pid] += dl
+            games[gid] = (prob, dw, dl)
+    return r, games
+
+
 def compute(state):
-    """Recompute every rating from the closed sessions, oldest first."""
+    """Recompute every rating from the closed sessions, oldest first. league["rating"]: "average" (every order of a
+    night's rounds) or "played" (each game in the order played). As compute in docs/core.js."""
+    played = state.get("league", {}).get("rating") == "played"
     players = state["players"]
     rating = {pid: p["seed"] for pid, p in players.items()}
     totals = {pid: dict(w=0, l=0, pf=0, pa=0) for pid in players}
@@ -248,7 +267,8 @@ def compute(state):
             if not rounds:
                 continue
             target = target_of(sess, pool)
-            ends, gmean = all_orders(start, [[(gid, win, lose) + scaled(ws, ls, target) for gid, win, lose, ws, ls in rd] for rd in rounds])
+            rated = [[(gid, win, lose) + scaled(ws, ls, target) for gid, win, lose, ws, ls in rd] for rd in rounds]
+            ends, gmean = played_order(rating, rated) if played else all_orders(start, rated)
             for pid, v in ends.items():
                 rating[pid] = rnd(v)
                 rec[pid] = dict(pool=pool["id"], start=start[pid], end=rating[pid], w=0, l=0, pf=0, pa=0)

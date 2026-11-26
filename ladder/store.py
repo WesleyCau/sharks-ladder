@@ -52,7 +52,7 @@ def courts_for(count):
 
 def empty_state(name="Southern Sharks PC Ladder League"):
     return dict(version=1, seq=dict(p=0, s=0, g=0),
-                league=dict(name=name, seeds=DEFAULT_SEEDS[:], poolSize=8, pointsToWin=11),
+                league=dict(name=name, seeds=DEFAULT_SEEDS[:], poolSize=8, pointsToWin=11, rating="average"),
                 players={}, sessions=[], ratings=dict(current={}, sessions={}, games={}, totals={}))
 
 
@@ -227,6 +227,13 @@ class Store:
             if a["schedule"] != lg.get("schedule", "ranker") and sess and sess["status"] == "setup":
                 self._clear_schedule(sess)      # drawn again under the new choice
             lg["schedule"] = a["schedule"]
+        if "rating" in a:
+            if a["rating"] not in ("average", "played"):
+                raise ActionError("invalid", "Choose how ratings are worked out.")
+            was = lg.get("rating", "average")
+            lg["rating"] = a["rating"]
+            if a["rating"] != was:
+                self.recompute()      # the whole season again, under the other method
         if "pointsToWin" in a:
             raw = str(a["pointsToWin"]).strip()
             pts = int(raw) if raw.isdigit() else 0

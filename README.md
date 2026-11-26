@@ -16,6 +16,8 @@ The formula is the club's, including its rounding: replayed in the order the gam
 
 The site then goes one step further. Each night is averaged over every order its rounds could have been played in, so a result is worth the same whether it came in round 1 or round 9. Over Season 7 that moves a player's 4DR by 0.016 on average and 0.037 at most, and 17 of 46 players change rank, none by more than 3 places.
 
+Which of the two the site shows is the organiser's choice, under Organiser, Settings, "How 4DR is worked out": **Every order** (the average, the default) or **As played** (each game in the order it was played, which gives pickleballranker's figures exactly). Switching re-rates the whole season, so either can be looked at on the same results.
+
 ## Three ways to run it
 
 | Mode | Where the data lives | Use it for |
