@@ -19,8 +19,14 @@ def _rows(folder, name):
         return list(csv.DictReader(f))
 
 
-def build(source=SOURCE, name="Southern Sharks PC Season 7"):
+def build(source=SOURCE, name="Southern Sharks PC Season 7", until=None):
+    """until: an ISO date. Nights after it, and players who first played after it, are left out (the tests use this,
+    so that a new week in the CSVs does not change the league they run on)."""
     ratings, weekly, games = _rows(source, "ratings.csv"), _rows(source, "weekly.csv"), _rows(source, "games.csv")
+    if until:
+        weekly, games = [w for w in weekly if w["date"] <= until], [g for g in games if g["date"] <= until]
+        seen = {w["player"] for w in weekly}
+        ratings = [r for r in ratings if r["Player"] in seen]
     state = empty_state(name)
     ids = {}
     for r in ratings:

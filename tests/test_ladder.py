@@ -128,7 +128,7 @@ class StoreTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         with open(os.path.join(self.tmp.name, "league.json"), "w", encoding="utf-8") as f:
-            json.dump(importer.build(), f)
+            json.dump(importer.build(until="2026-11-20"), f)     # a fixed league: later weeks in the CSVs do not move the tests
         self.store = Store(self.tmp.name)
 
     def tearDown(self):
@@ -333,6 +333,30 @@ class StoreTest(unittest.TestCase):
         sid2 = st.apply("session.create", dict(date="2026-11-30"), org=True)["id"]
         self.assertNotIn(out, st.state["sessions"][-1]["attending"])
         self.assertTrue(sid2)
+
+    def test_swap_in_a_live_session(self):
+        st = self.store
+        sid = st.apply("session.create", dict(date="2026-11-23"), org=True)["id"]
+        sess = st.state["sessions"][-1]
+        st.apply("session.assign", dict(sid=sid), org=True)
+        st.apply("session.start", dict(sid=sid), org=True)
+        pool = sess["pools"][0]
+        a, b = pool["players"][0], pool["players"][-1]
+        before = {gid: (list(g["t1"]), list(g["t2"])) for gid, g in sess["games"].items()}
+        first = pool["rounds"][0][0]
+        st.apply("game.score", dict(sid=sid, gid=first, s1=11, s2=5))
+        with self.assertRaises(ActionError):
+            st.apply("session.swap", dict(sid=sid, a=a, b=sess["pools"][1]["players"][0]), org=True)
+        res = st.apply("session.swap", dict(sid=sid, a=a, b=b), org=True)
+        ex = {a: b, b: a}
+        self.assertEqual((pool["players"][0], pool["players"][-1]), (b, a))
+        self.assertEqual(sess["status"], "live")
+        for gid, (t1, t2) in before.items():
+            self.assertEqual(sess["games"][gid]["t1"], [ex.get(p, p) for p in t1])
+            self.assertEqual(sess["games"][gid]["t2"], [ex.get(p, p) for p in t2])
+        self.assertEqual(res["games"], sum(1 for t1, t2 in before.values() if a in t1 + t2 or b in t1 + t2))
+        g = sess["games"][first]
+        self.assertEqual((g["status"], g["s1"], g["s2"]), ("done", 11, 5))
 
     def test_uneven_attendance(self):
         st = self.store

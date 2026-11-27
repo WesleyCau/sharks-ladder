@@ -1184,6 +1184,12 @@ function orgLive(s) {
       <button class="btn" type="submit">Substitute</button></div>
     <p class="muted">Replacement not listed? Add them under Players first.</p>${errLine("sub")}</form>
 
+  <form class="card" data-form="liveswap" data-sid="${s.id}"><h2>Swap two players</h2>
+    <p class="muted">For a pool where the sheet has two players the other way round. They exchange places in every game of their pool, <b>games already scored included</b>: each score stays with its place on the sheet. Swap them again to undo.</p>
+    <div class="row" style="align-items:flex-end">
+      ${[["swapa", "First player"], ["swapb", "Second player"]].map(([id, label]) => `<label class="field">${label}<select id="${id}"><option value="">Choose</option>${s.pools.map(p => `<optgroup label="${esc(p.name)}">${p.players.map((pid, i) => `<option value="${pid}" ${app.form[id] === pid ? "selected" : ""}>${i + 1}. ${esc(nm(pid))}</option>`).join("")}</optgroup>`).join("")}</select></label>`).join("")}
+      <button class="btn" type="submit">Swap</button></div>${errLine("liveswap")}</form>
+
   <div class="card"><div class="row spread"><h2>Games not played</h2>
       ${open.length ? `<button class="btn small${app.showSkip ? "" : " primary"}" data-act="toggleSkip">${app.showSkip ? "Hide the list" : "Choose games"}</button>` : ""}</div>
     <p class="muted">Mark a game as not played if it will not happen in this session. ${!open.length ? "Every game has a score." : `${open.length === 1 ? "1 game has" : open.length + " games have"} no score${marked ? `, ${marked} marked not played` : ""}.`}</p>
@@ -1655,6 +1661,11 @@ const FORMS = {
     if (!app.form.subout || !app.form.subin) { app.err.sub = "Choose both players."; return render(); }
     const j = await act("sub", "session.substitute", { sid: form.dataset.sid, out: app.form.subout, in: app.form.subin });
     if (j.ok) { toast(`Substituted into ${j.result.games} games`); app.form.subout = app.form.subin = ""; render(); }
+  },
+  liveswap: async form => {
+    if (!app.form.swapa || !app.form.swapb) { app.err.liveswap = "Choose both players."; return render(); }
+    const j = await act("liveswap", "session.swap", { sid: form.dataset.sid, a: app.form.swapa, b: app.form.swapb });
+    if (j.ok) { toast(`Swapped in ${j.result.games} games`); app.form.swapa = app.form.swapb = ""; render(); }
   },
   league: () => act("league", "league.update", { name: app.form.lname ?? app.st.league.name, pointsToWin: app.form.lpts ?? app.st.league.pointsToWin }, "Saved"),
 };

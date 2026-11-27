@@ -136,7 +136,7 @@ const Backends = (() => {
        against the session as the database holds it at that moment, not this device's copy of it. A score a phone saved
        a moment ago is therefore seen: the change is refused ("clear the score first") or made around it (a substitute
        leaves that game with the players who played it), never written over it. */
-    const ON_SESSION = new Set(["game.skip", "session.substitute", "session.reset", "session.unstart", "session.pool"]);
+    const ON_SESSION = new Set(["game.skip", "session.substitute", "session.swap", "session.reset", "session.unstart", "session.pool"]);
     const prune = v => {      // the database stores no nulls: leave them out of what is written
       if (Array.isArray(v)) return v.map(prune);
       if (!isObj(v)) return v;

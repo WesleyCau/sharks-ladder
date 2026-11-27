@@ -130,6 +130,21 @@ async function test(name, fn) {
     assert.ok(after.attending.includes(out) && after.attending.includes(sub), "the player who left has a result tonight, so stays on the list");
   });
 
+  await test("a swap in a live session exchanges the two in every game, and keeps a score a phone has just saved", async () => {
+    const before = db.read(`sessions/${sid}`), [a, b] = before.pools[0].players;
+    const free = Object.values(before.games).find(g => g.status === "pending" && g.t1.concat(g.t2).includes(a));
+    db.write(`sessions/${sid}/games/${free.id}`, Object.assign({}, free, { s1: 11, s2: 6, status: "done", at: 3 }), true);
+    assert.strictEqual(state.sessions.find(s => s.id === sid).games[free.id].status, "pending");   // this device has not seen it
+    await ok("session.swap", { sid, a, b });
+    const after = db.read(`sessions/${sid}`), ex = p => (p === a ? b : p === b ? a : p);
+    assert.deepStrictEqual(after.pools[0].players.slice(0, 2), [b, a]);
+    assert.strictEqual(after.status, "live");
+    Object.values(before.games).forEach(g => { assert.deepStrictEqual(after.games[g.id].t1, g.t1.map(ex)); assert.deepStrictEqual(after.games[g.id].t2, g.t2.map(ex)); });
+    assert.deepStrictEqual([after.games[free.id].status, after.games[free.id].s1, after.games[free.id].s2], ["done", 11, 6]);
+    await ok("session.swap", { sid, a, b });                                                       // and back, for the tests that follow
+    await ok("game.clear", { sid, gid: free.id });
+  });
+
   await test("loading a league over a live session needs an explicit yes", async () => {
     db.flush();
     const copy = JSON.parse(JSON.stringify(state)), scored = Object.values(db.read(`sessions/${sid}/games`)).filter(g => g.status === "done").length;

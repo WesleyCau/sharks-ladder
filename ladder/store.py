@@ -394,8 +394,9 @@ class Store:
         self._clear_schedule(sess)
 
     def do_session_swap(self, a, org):
-        """Two players in the same pool change places in its order (the schedule slot under pickleballranker's rounds)."""
-        sess = self._session(a.get("sid"), "setup")
+        """Two players in the same pool change places in its order (the schedule slot under pickleballranker's rounds).
+        In a session that has started they exchange names in every game of the pool instead, scored games included."""
+        sess = self._session(a.get("sid"), "setup", "live")
         pool = next((p for p in sess["pools"] if a.get("a") in p["players"]), None)
         if pool is None:
             raise ActionError("missing", "That player is not in a pool.")
@@ -405,8 +406,18 @@ class Store:
         if i == j:
             raise ActionError("invalid", "Choose two different players.")
         pool["players"][i], pool["players"][j] = a["b"], a["a"]
-        self._clear_schedule(sess)
-        return dict(pool=pool["id"], slots=[i + 1, j + 1])
+        if sess["status"] == "setup":
+            self._clear_schedule(sess)
+            return dict(pool=pool["id"], slots=[i + 1, j + 1])
+        other = {a["a"]: a["b"], a["b"]: a["a"]}
+        games = 0
+        for g in sess["games"].values():
+            if g["pool"] != pool["id"] or not any(p in other for p in g["t1"] + g["t2"]):
+                continue
+            g["t1"] = [other.get(p, p) for p in g["t1"]]
+            g["t2"] = [other.get(p, p) for p in g["t2"]]
+            games += 1
+        return dict(pool=pool["id"], slots=[i + 1, j + 1], games=games)
 
     def do_session_pool(self, a, org):
         sess = self._session(a.get("sid"), "setup", "live")

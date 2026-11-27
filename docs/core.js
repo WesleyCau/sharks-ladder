@@ -560,15 +560,23 @@
     clearSchedule(s);
   };
   /* Two players in the same pool change places in its order. The order is the schedule slot when the league plays
-     pickleballranker's rounds, so this is how the organiser copies a pool where that site has two players the other way round. */
+     pickleballranker's rounds, so this is how the organiser copies a pool where that site has two players the other way round.
+     Once the session has started the draw stays as it is and the two exchange names in every game of the pool, games
+     already scored included: a score belongs to the place on the sheet, and the sheet had the two the other way round. */
   H["session.swap"] = (st, a) => {
-    const s = getSession(st, a.sid, "setup"), pool = s.pools.find(p => p.players.includes(a.a)) || fail("missing", "That player is not in a pool.");
+    const s = getSession(st, a.sid, "setup", "live"), pool = s.pools.find(p => p.players.includes(a.a)) || fail("missing", "That player is not in a pool.");
     const i = pool.players.indexOf(a.a), j = pool.players.indexOf(a.b);
     if (j < 0) fail("invalid", "Both players must be in the same pool.");
     if (i === j) fail("invalid", "Choose two different players.");
     pool.players[i] = a.b; pool.players[j] = a.a;
-    clearSchedule(s);
-    return { pool: pool.id, slots: [i + 1, j + 1] };
+    if (s.status === "setup") { clearSchedule(s); return { pool: pool.id, slots: [i + 1, j + 1] }; }
+    const other = p => (p === a.a ? a.b : p === a.b ? a.a : p);
+    let games = 0;
+    for (const g of Object.values(s.games)) {
+      if (g.pool !== pool.id || !g.t1.concat(g.t2).some(p => p === a.a || p === a.b)) continue;
+      g.t1 = g.t1.map(other); g.t2 = g.t2.map(other); games++;
+    }
+    return { pool: pool.id, slots: [i + 1, j + 1], games };
   };
   H["session.pool"] = (st, a) => {
     const s = getSession(st, a.sid, "setup", "live");
