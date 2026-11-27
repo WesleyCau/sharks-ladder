@@ -124,8 +124,9 @@ const Backends = (() => {
       const idx = sess.pools.findIndex(p => p.id === args.pool), round = parseInt(args.round, 10);
       if (idx < 0) return { ok: false, code: "missing", message: "Pool not found." };
       if (!Ladder.roundReady(sess, sess.pools[idx], round)) return { ok: false, code: "scores", message: "Enter every score in this round first." };
+      const to = Ladder.nextRound(sess, sess.pools[idx], round);        // best of 3: a third game that is not needed is passed over
       try {
-        await db.runTransaction(db.ref(database, `sessions/${args.sid}/pools/${idx}/confirmed`), cur => ((cur || 0) === round ? round + 1 : undefined));
+        await db.runTransaction(db.ref(database, `sessions/${args.sid}/pools/${idx}/confirmed`), cur => ((cur || 0) === round ? to : undefined));
         return { ok: true, result: {} };
       } catch (e) { return failure(e); }
     }

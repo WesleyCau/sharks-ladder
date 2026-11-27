@@ -448,6 +448,17 @@ class Store:
                 raise ActionError("invalid", "A pool can play first to %s." % " or ".join([", ".join(map(str, choices[:-1])), str(choices[-1])] if len(choices) > 1 else [str(choices[0])]))
             pool["target"] = t
             pool.pop("autoTarget", None)
+        if "bestOf" in a:
+            sess = self._session(a.get("sid"), "setup")      # the format is fixed once the session has started
+            if str(a["bestOf"]) == "3":
+                if len(pool["players"]) != 4:
+                    raise ActionError("invalid", "Best of 3 is for a pool of four.")
+                pool["bestOf"] = 3
+            else:
+                pool.pop("bestOf", None)
+            sess["games"] = {}
+            for p in sess["pools"]:
+                p["rounds"] = []
 
     def do_session_schedule(self, a, org):
         sess = self._session(a.get("sid"), "setup")
@@ -465,7 +476,9 @@ class Store:
         for pool in sess["pools"]:
             pool["rounds"] = []
             pool["confirmed"] = 0
-            for ri, rd in enumerate(scheduler.generate(pool["players"], seed=sess["id"] + pool["id"], mode=self.state["league"].get("schedule", "ranker"))):
+            if pool.get("bestOf") and len(pool["players"]) != 4:
+                pool.pop("bestOf")
+            for ri, rd in enumerate(scheduler.generate(pool["players"], seed=sess["id"] + pool["id"], mode=self.state["league"].get("schedule", "ranker"), best_of=pool.get("bestOf"))):
                 ids = []
                 for t1, t2 in rd:
                     gid = self._id("g")
@@ -583,9 +596,12 @@ class Store:
             return dict(round=at)
         if rnd_no > at or rnd_no >= len(pool["rounds"]):
             raise ActionError("order", "That round is not being played yet.")
-        if any(sess["games"][gid]["status"] == "pending" for gid in pool["rounds"][rnd_no]):
+        if any(sess["games"][gid]["status"] == "pending" for gid in pool["rounds"][rnd_no]) and not dead_round(sess, pool, rnd_no):
             raise ActionError("scores", "Enter every score in this round first.")
-        pool["confirmed"] = rnd_no + 1
+        nxt = rnd_no + 1
+        while nxt < len(pool["rounds"]) and dead_round(sess, pool, nxt):
+            nxt += 1
+        pool["confirmed"] = nxt
         return dict(round=pool["confirmed"])
 
     def do_round_back(self, a, org):
@@ -655,4 +671,14 @@ class Store:
 
 
 # Actions anyone on the network may send during a live session. Everything else needs the organiser PIN.
+def dead_round(sess, pool, rnd_no):
+    """Best of 3 (a pool of four): the third game of a match that one pair has already won 2-0. Same rule as deadRound in docs/core.js."""
+    rounds = pool.get("rounds") or []
+    if pool.get("bestOf") != 3 or len(pool["players"]) != 4 or len(rounds) != 9 or rnd_no % 3 != 2 or rnd_no >= len(rounds):
+        return False
+    a, b, c = (sess["games"].get(rounds[k][0]) for k in (rnd_no - 2, rnd_no - 1, rnd_no))
+    return bool(a and b and c and c["status"] == "pending" and a["status"] == "done" and b["status"] == "done"
+                and (a["s1"] > a["s2"]) == (b["s1"] > b["s2"]))
+
+
 OPEN_ACTIONS = {"game.score", "game.clear", "round.confirm"}

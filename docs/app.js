@@ -143,14 +143,26 @@ const shortDate = d => new Date(d + "T00:00").toLocaleDateString(undefined, { da
 
 /* Where a pool is up to: the round on court, the one after, and whether the scores are all in. */
 function roundInfo(s, pool) {
-  const total = pool.rounds.length, at = Math.min(pool.confirmed || 0, total);
+  const total = pool.rounds.length, at = Math.min(pool.confirmed || 0, total), dead = g => Ladder.deadGame(s, g);
   const all = poolGames(s, pool), games = at < total ? pool.rounds[at].map(id => s.games[id]) : [];
-  const next = at + 1 < total ? pool.rounds[at + 1].map(id => s.games[id]) : [];
+  const ready = games.length > 0 && games.every(g => g.status !== "pending" || dead(g));
+  /* best of 3: once the scores are in, the round after this one is known (a third game that is not needed is passed over) */
+  const nx = ready ? Ladder.nextRound(s, pool, at) : at + 1;
+  const next = nx < total ? pool.rounds[nx].map(id => s.games[id]) : [];
   const off = list => { const on = new Set(list.flatMap(g => [...g.t1, ...g.t2])); return list.length ? pool.players.filter(p => !on.has(p)) : []; };
-  return { total, at, finished: at >= total, games, next, sitting: off(games), sittingNext: off(next),
-    ready: games.length > 0 && games.every(g => g.status !== "pending"), waiting: games.filter(g => g.status === "pending").length,
-    done: all.filter(g => g.status === "done").length, playable: all.filter(g => g.status !== "skipped").length,
-    missed: all.filter(g => g.status === "pending" && g.round < at).length };
+  return { total, at, nx, bo3: total > 0 && Ladder.isBo3(pool), finished: at >= total, games, next, sitting: off(games), sittingNext: off(next),
+    ready, waiting: games.filter(g => g.status === "pending" && !dead(g)).length,
+    done: all.filter(g => g.status === "done").length, playable: all.filter(g => g.status !== "skipped" && !dead(g)).length,
+    missed: all.filter(g => g.status === "pending" && g.round < at && !dead(g)).length };
+}
+/* "Round 4 of 9", or in a best of 3 pool "Match 2 of 3 · game 1". */
+const roundName = (r, i) => (r.bo3 ? `Match ${Math.floor(i / 3) + 1} of 3 · game ${i % 3 + 1}` : `Round ${i + 1} of ${r.total}`);
+/* Best of 3: where the match on court stands. */
+function matchLine(s, pool, r) {
+  if (!r.bo3 || r.finished) return "";
+  const m = Math.floor(r.at / 3), gs = [0, 1, 2].map(k => s.games[pool.rounds[3 * m + k][0]]);
+  const won = first => gs.filter(g => g.status === "done" && (first ? g.s1 > g.s2 : g.s2 > g.s1)).length;
+  return `<p class="muted small" style="margin:0">Best of 3. Games won: ${teamLine(gs[0].t1)} <b class="num">${won(true)}</b>, ${teamLine(gs[0].t2)} <b class="num">${won(false)}</b>.</p>`;
 }
 const pct = r => (r.playable ? Math.round(100 * r.done / r.playable) : 0);
 function poolTable(s, pool) {
@@ -297,10 +309,10 @@ function shell(body) {
 const errLine = area => (app.err[area] ? `<p class="err" role="alert">${esc(app.err[area])}</p>` : "");
 /* One game as a scoreboard: a row per pair, names on the left, score on the right. */
 function matchCard(s, g, opts = {}) {
-  const done = g.status === "done", skipped = g.status === "skipped";
+  const done = g.status === "done", dead = Ladder.deadGame(s, g), skipped = g.status === "skipped" || dead;
   const side = (ids, pts, won) => `<div class="side ${done ? (won ? "won" : "lost") : ""}"><div class="names">${team(ids)}</div>${opts.preview ? "" : `<div class="pts">${done ? pts : ""}</div>`}</div>`;
   const tag = opts.label ? `<span class="ct">${opts.label}</span>` : "";
-  const button = opts.preview ? "" : skipped ? `<p class="muted np">${tag}Not played</p>`
+  const button = opts.preview ? "" : skipped ? `<p class="muted np">${tag}${dead ? "Not needed: the match is already won" : "Not played"}</p>`
     : `<button class="btn huge ${done ? "quiet" : "primary"}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${tag}<span>${done ? (Math.max(g.s1, g.s2) < Ladder.gameTarget(app.st, s, g.id) ? "Stopped early · Edit score" : "Edit score") : "Enter score"}</span></button>`;
   return `<div class="match ${done ? "is-done" : skipped ? "is-skipped" : opts.preview ? "is-preview" : "is-live"}">
     ${side(g.t1, g.s1, g.s1 > g.s2)}${side(g.t2, g.s2, g.s2 > g.s1)}${button}</div>`;
@@ -308,14 +320,14 @@ function matchCard(s, g, opts = {}) {
 /* All courts card. Names on the left, "vs Court 1" on the bar between the pairs, the score column on the right.
    Until there is a score that column is the Enter score button; afterwards it shows the two scores with Edit between them. */
 function boardCard(s, g, label, confirm) {
-  const done = g.status === "done", skipped = g.status === "skipped", w1 = done && g.s1 > g.s2, w2 = done && g.s2 > g.s1;
+  const done = g.status === "done", dead = Ladder.deadGame(s, g), skipped = g.status === "skipped" || dead, w1 = done && g.s1 > g.s2, w2 = done && g.s2 > g.s1;
   const go = `data-act="flow" data-sid="${s.id}" data-gid="${g.id}"`, where = label ? label + ": " : "";
   const names = (ids, won, row) => `<div class="names r${row}${done ? (won ? " won" : " lost") : ""}">${team(ids)}</div>`;
   const right = done ? `<div class="pts r1 ${w1 ? "won" : "lost"}">${g.s1}</div><button class="editbtn" ${go} aria-label="${where}edit score">Edit</button><div class="pts r3 ${w2 ? "won" : "lost"}">${g.s2}</div>`
-    : skipped ? `<div class="enter off"><b>Not<br>played</b></div>`
+    : skipped ? `<div class="enter off"><b>Not<br>${dead ? "needed" : "played"}</b></div>`
     : `<button class="enter" ${go} aria-label="${where}enter score"><b>Enter<br>score</b></button>`;
   return `<div class="bmatch ${done ? "is-done" : skipped ? "is-skipped" : "is-live"}">${names(g.t1, w1, 1)}
-    ${confirm ? `<div class="mid go"><button class="confirmbtn" data-act="confirmRound" data-sid="${s.id}" data-pool="${confirm.pool}" data-round="${confirm.round}">Confirm round ${confirm.round + 1}<i aria-hidden="true">›</i></button></div>`
+    ${confirm ? `<div class="mid go"><button class="confirmbtn" data-act="confirmRound" data-sid="${s.id}" data-pool="${confirm.pool}" data-round="${confirm.round}">${confirm.bo3 ? "Confirm game" : `Confirm round ${confirm.round + 1}`}<i aria-hidden="true">›</i></button></div>`
       : `<div class="mid"><span class="vsl"><i>vs</i>${label ? `<b>${label}</b>` : ""}</span></div>`}${names(g.t2, w2, 3)}${right}</div>`;
 }
 /* Width of the widest name as the board draws it, in ems, measured in the page so it follows the stylesheet. */
@@ -336,7 +348,7 @@ function roundCards(s, pool, r, board) {
   let waiting = 0;
   return r.games.map((g, i) => {
     const label = pool.courts > 1 ? (i < pool.courts ? `Court ${i + 1}` : "Next court") : g.status !== "pending" ? "" : waiting++ === 0 ? "Now" : "Next";
-    return board ? boardCard(s, g, label, r.ready && !r.finished ? { pool: pool.id, round: r.at } : null) : matchCard(s, g, { label });
+    return board ? boardCard(s, g, label, r.ready && !r.finished ? { pool: pool.id, round: r.at, bo3: r.bo3 } : null) : matchCard(s, g, { label });
   }).join("");
 }
 /* Type sizes for the wide screens (board and draw) that keep every name and every pair on one line, whatever the names are. */
@@ -364,14 +376,14 @@ function fit(s) {
 function drawPool(s, p) {
   const r = roundInfo(s, p);
   return `<section class="dpool">
-    <a class="dp-head" href="#/court/${p.id}"><h2>${esc(p.name)}</h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}${targetTag(s, p)}</span></a>
+    <a class="dp-head" href="#/court/${p.id}"><h2>${esc(p.name)}</h2><span class="round">${r.finished ? "Finished" : roundName(r, r.at)}${targetTag(s, p)}</span></a>
     ${p.rounds.map((ids, i) => {
       const games = ids.map(id => s.games[id]), on = new Set(games.flatMap(g => [...g.t1, ...g.t2])), sit = p.players.filter(x => !on.has(x));
-      return `<div class="drd ${i < r.at ? "past" : i === r.at ? "now" : ""}"><span class="drd-n" aria-label="Round ${i + 1}"><small>R</small>${i + 1}</span><div class="drd-g">
+      return `<div class="drd ${i < r.at ? "past" : i === r.at ? "now" : ""}"><span class="drd-n" aria-label="${r.bo3 ? `Match ${Math.floor(i / 3) + 1} game ${i % 3 + 1}` : `Round ${i + 1}`}"><small>${r.bo3 ? "M" + (Math.floor(i / 3) + 1) : "R"}</small>${r.bo3 ? i % 3 + 1 : i + 1}</span><div class="drd-g">
         ${games.map((g, k) => {
           const done = g.status === "done", w1 = done && g.s1 > g.s2, w2 = done && g.s2 > g.s1;
           const court = `<span class="dc">${p.courts > 1 ? (k < p.courts ? "C" + (k + 1) : "+") : k + 1}</span>`;      // "+": more games than courts, on the next one free
-          return `<div class="dg${g.status === "skipped" ? " skip" : ""}">
+          return `<div class="dg${g.status === "skipped" || Ladder.deadGame(s, g) ? " skip" : ""}">
             <span class="dpair${w1 ? " w" : ""}">${teamLine(g.t1)}</span>${done ? `<span class="ds${w1 ? " w" : ""}">${g.s1}</span>` : court}
             <span class="dpair${w2 ? " w" : ""}">${teamLine(g.t2)}</span>${done ? `<span class="ds${w2 ? " w" : ""}">${g.s2}</span>` : ""}</div>`;
         }).join("")}
@@ -381,7 +393,7 @@ function drawPool(s, p) {
 /* One slot under a round's games: either how many scores are missing, or the confirm button. Same size either way. */
 function confirmBlock(s, pool, r, brief) {
   if (r.finished) return "";
-  const label = r.at + 1 < r.total ? `Confirm and start ${brief ? "R" : "round "}${r.at + 2}` : "Confirm and finish";
+  const label = r.nx >= r.total ? "Confirm and finish" : r.bo3 ? (r.nx % 3 === 0 ? "Confirm and start the next match" : `Confirm and start game ${r.nx % 3 + 1}`) : `Confirm and start ${brief ? "R" : "round "}${r.nx + 1}`;
   return r.ready ? `<button class="slot go" data-act="confirmRound" data-sid="${s.id}" data-pool="${pool.id}" data-round="${r.at}">${label}</button>`
     : `<div class="slot wait">${r.waiting === 1 ? "1 score to go" : `${r.waiting} scores to go`}</div>`;
 }
@@ -389,7 +401,7 @@ function confirmBlock(s, pool, r, brief) {
 function nextBox(pool, r, compact) {
   if (!r.next.length) return "";
   return `<section class="nextbox ${compact ? "compact" : ""}">
-    <h2><span>Next round</span>${compact ? "" : `<span class="num">Round ${r.at + 2} of ${r.total}</span>`}</h2>
+    <h2><span>${r.bo3 ? (r.nx % 3 === 2 && !r.ready ? "Next game, if needed" : "Next game") : "Next round"}</span>${compact ? "" : `<span class="num">${roundName(r, r.nx)}</span>`}</h2>
     ${r.next.map((g, i) => compact
       ? `<div class="nx side-tag"><span class="nx-tag">${i + 1}</span><div class="nx-lines"><b>${teamLine(g.t1)}</b><b>${teamLine(g.t2)}</b></div></div>`
       : `<div class="nx"><span class="nx-tag">${pool.courts > 1 ? (i < pool.courts ? "Court " + (i + 1) : "Then") : i === 0 ? "First on court" : "Then"}</span>
@@ -417,10 +429,10 @@ function resultRows(s, pool, canEdit, upto) {
   if (!rows.length) return '<p class="muted">No results yet.</p>';
   return `<div class="results">${rows.map(g => {
     const w1 = g.status === "done" && g.s1 > g.s2, w2 = g.status === "done" && g.s2 > g.s1;
-    const mark = g.status === "done" ? null : g.status === "skipped" ? "not played" : upto != null ? "no score yet" : "to play";
+    const mark = g.status === "done" ? null : g.status === "skipped" ? "not played" : Ladder.deadGame(s, g) ? "not needed" : upto != null ? "no score yet" : "to play";
     const early = g.status === "done" && Math.max(g.s1, g.s2) < Ladder.gameTarget(app.st, s, g.id);
     const line = (ids, pts, won) => `<span class="ln ${won ? "w" : ""}"><span>${teamLine(ids)}</span><span class="sc">${mark ? "" : pts}</span></span>`;
-    const btn = canEdit ? `<button class="btn small${g.status === "pending" && upto != null ? " primary" : ""}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${g.status === "done" ? "Change" : "Enter"}</button>` : "";
+    const btn = canEdit ? `<button class="btn small${g.status === "pending" && upto != null && !Ladder.deadGame(s, g) ? " primary" : ""}" data-act="flow" data-sid="${s.id}" data-gid="${g.id}">${g.status === "done" ? "Change" : "Enter"}</button>` : "";
     return `<div class="res"><span class="rd">R${g.round + 1}</span>
       <span class="who lines">${line(g.t1, g.s1, w1)}${line(g.t2, g.s2, w2)}${mark ? `<span class="muted">${mark}</span>` : early ? '<span class="muted">stopped early</span>' : ""}</span>${btn}</div>`;
   }).join("")}</div>`;
@@ -560,10 +572,10 @@ function viewCourt(pid) {
   if (!s || s.status !== "live" || !pool) return `<a class="back" href="#/">‹ All pools</a><div class="head"><h1>No live games here</h1><p class="muted">This pool is not playing right now.</p></div>`;
   const r = roundInfo(s, pool);
   return `<div class="court"><a class="back" href="#/">‹ All pools</a>
-    <div class="head"><div class="row spread"><h1>${esc(pool.name)}</h1><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}${targetTag(s, pool)}</span></div>
+    <div class="head"><div class="row spread"><h1>${esc(pool.name)}</h1><span class="round">${r.finished ? "Finished" : roundName(r, r.at)}${targetTag(s, pool)}</span></div>
       <span class="bar on-surface"><i style="width:${pct(r)}%"></i></span></div>
     ${r.finished ? '<div class="note"><b>All rounds finished.</b> Thanks for playing. Final standings are below.</div>' + backBlock(s, pool, r) : `
-      <section class="stack">${roundCards(s, pool, r)}
+      <section class="stack">${matchLine(s, pool, r)}${roundCards(s, pool, r)}
         ${r.sitting.length ? `<p class="sit"><b>Sitting out</b> ${namesList(r.sitting)}</p>` : ""}
         ${errLine("court")}${confirmBlock(s, pool, r)}${backBlock(s, pool, r)}</section>`}
     ${r.missed ? `<p class="note warn">⚠ ${r.missed === 1 ? "1 earlier game has" : r.missed + " earlier games have"} no score. Enter ${r.missed === 1 ? "it" : "them"} under Earlier rounds below.</p>` : ""}
@@ -580,7 +592,7 @@ function viewBoard() {
     <div class="board" style="${fit(s)}">${s.pools.map(p => {
       const r = roundInfo(s, p);
       return `<div class="stack">
-        <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`}${targetTag(s, p)}</span></div>
+        <div class="row spread bhead"><h2><a href="#/court/${p.id}">${esc(p.name)}</a></h2><span class="round">${r.finished ? "Finished" : roundName(r, r.at)}${targetTag(s, p)}</span></div>
         ${r.finished ? '<div class="note">All rounds finished.</div>' : roundCards(s, p, r, true) + (r.sitting.length ? `<p class="sit now"><b>Sitting out now</b> ${namesList(r.sitting)}</p>` : "")}
         ${r.missed ? `<a class="note warn" href="#/court/${p.id}">⚠ ${r.missed === 1 ? "1 earlier game has" : r.missed + " earlier games have"} no score. Tap to enter.</a>` : ""}
         ${nextBox(p, r, true)}${backBlock(s, p, r)}
@@ -1049,8 +1061,9 @@ function outOfOrder(s) {
 }
 
 /* What a pool of n players will play: rounds, games a round, games each. */
-function poolPlan(n, courts) {
+function poolPlan(n, courts, bo3) {
   if (n < Ladder.MIN_POOL || n > Ladder.MAX_POOL) return null;
+  if (bo3 && n === 4) return { per: 1, rounds: 9, each: "6 to 9", warn: "", bo3: true, text: "3 matches, each the best of 3 games: 6 to 9 games each" };
   const per = Math.floor(n / 4), rounds = Ladder.roundCount(n), each = Math.round(rounds * per * 4 / n);
   const warn = per > (courts || 1) && per > 2 ? "Three games a round: give this pool 3 courts, or it will run long."
     : rounds > 9 ? `${rounds} rounds${per < 2 ? ", one game at a time" : ""}. A pool of eight plays 7 and a pool of nine plays 9, so this pool will finish later.` : "";
@@ -1058,8 +1071,9 @@ function poolPlan(n, courts) {
 }
 /* Everything worth a warning about one pool before the start: its rounds and courts, and a night much longer than the other pools'. */
 function poolWarn(s, p) {
-  const plan = poolPlan(p.players.length, p.courts);
+  const plan = poolPlan(p.players.length, p.courts, Ladder.isBo3(p));
   if (!plan) return "";
+  if (plan.bo3) return "";
   const play = q => Ladder.roundCount(q.players.length) * targetFor(s, q);
   const others = s.pools.filter(q => q !== p && q.players.length >= 8 && q.players.length <= Ladder.MAX_POOL).map(play);
   const ref = others.length ? Math.max(...others) : 0, mine = play(p);
@@ -1084,7 +1098,7 @@ function orgSetup(s) {
   const sizes = s.pools.map(p => p.players.length), att = s.attending.length, minP = Math.max(1, Math.ceil(att / Ladder.MAX_POOL)), maxP = Math.max(1, Math.floor(att / Ladder.MIN_POOL));
   const odd = Object.fromEntries(outOfOrder(s).map(o => [o.id, o])), oddN = Object.keys(odd).length;
   /* pools no longer look like a fresh assignment: players moved, or a target or a court count set by hand (re-assigning drops those too) */
-  const hand = s.pools.length > 0 && (oddN > 0 || Math.max(...sizes) - Math.min(...sizes) > 1 || s.pools.some(p => p.target || p.courtsHand));
+  const hand = s.pools.length > 0 && (oddN > 0 || Math.max(...sizes) - Math.min(...sizes) > 1 || s.pools.some(p => p.target || p.courtsHand || p.bestOf));
   const pl = (id, i) => `<li><button class="pl${odd[id] ? " out" : ""}" data-drag data-act="pick" data-pid="${id}" aria-pressed="${sel === id}"><span class="rk">${i === null ? "" : i + 1}</span><span class="nm">${fitName(id)}${odd[id] ? `<small>⚠ ${odd[id].high ? "higher" : "lower"} than their rating</small>` : ""}</span><span class="rt">${fmt(rating(id))}</span><span class="grip" data-grip aria-hidden="true">⠿</span></button></li>`;
   return `
   <div class="row spread"><h2>${niceDate(s.date)}</h2>
@@ -1111,14 +1125,15 @@ function orgSetup(s) {
     ${oddN ? `<p class="note warn">⚠ <b>${oddN === 1 ? "1 player is" : oddN + " players are"} out of rating order</b>, shown in yellow. You can still start: you will be asked to confirm.</p>` : ""}
     ${loose.length ? `<div class="pool warn" data-drop="none"><h3>Not in a pool yet (${loose.length})</h3><ol>${loose.map(id => pl(id, null)).join("")}</ol></div>` : ""}
     <div class="pools dz">${s.pools.map(p => {
-      const n = p.players.length, bad = games(n), plan = poolPlan(n, p.courts), warn = poolWarn(s, p);
+      const n = p.players.length, bad = games(n), plan = poolPlan(n, p.courts, Ladder.isBo3(p)), warn = poolWarn(s, p);
       return `<div class="pool ${bad ? "warn" : ""}" data-drop="${p.id}">
         <div class="row spread"><h3>${esc(p.name)} <span class="muted num">(${n})</span></h3>
           <span class="seg" role="group" aria-label="${esc(p.name)} courts">${(n >= 12 || p.courts === 3 ? [1, 2, 3] : [1, 2]).map(k => `<button data-act="courts" data-sid="${s.id}" data-pool="${p.id}" data-courts="${k}" aria-pressed="${p.courts === k}">${k} court${k > 1 ? "s" : ""}</button>`).join("")}</span></div>
         ${bad ? `<p class="err">${bad}</p>` : ""}
         ${plan ? `<div class="row spread tgt"><span class="seg" role="group" aria-label="${esc(p.name)} games are first to">${Ladder.targetChoices(app.st.league.pointsToWin).map(t => `<button data-act="ptarget" data-sid="${s.id}" data-pool="${p.id}" data-target="${t}" aria-pressed="${targetFor(s, p) === t}">to ${t}</button>`).join("")}</span>
           ${p.target ? `<button class="linkbtn" data-act="ptarget" data-sid="${s.id}" data-pool="${p.id}" data-target="auto">Back to automatic</button>` : '<span class="muted small">automatic</span>'}</div>` : ""}
-        ${plan ? `<p class="plan">${plan.text}, first to ${targetFor(s, p)} <b class="num">(${plan.rounds * targetFor(s, p)} points of play)</b>${warn ? `<span>⚠ ${warn}</span>` : ""}</p>` : ""}
+        ${n === 4 ? `<div class="row spread tgt"><span class="seg" role="group" aria-label="${esc(p.name)} format">${[[1, "Single games"], [3, "Best of 3"]].map(([k, label]) => `<button data-act="pbest" data-sid="${s.id}" data-pool="${p.id}" data-best="${k}" aria-pressed="${Ladder.isBo3(p) === (k === 3)}">${label}</button>`).join("")}</span></div>` : ""}
+        ${plan ? `<p class="plan">${plan.text}, first to ${targetFor(s, p)} <b class="num">(${plan.bo3 ? "up to " : ""}${plan.rounds * targetFor(s, p)} points of play)</b>${warn ? `<span>⚠ ${warn}</span>` : ""}</p>` : ""}
         <ol>${p.players.map((id, i) => pl(id, i)).join("")}</ol></div>`;
     }).join("")}</div>
     ${errLine("pools")}</div>
@@ -1138,8 +1153,8 @@ function orgSetup(s) {
 }
 
 function orgLive(s) {
-  const pend = Object.values(s.games).filter(g => g.status === "pending").length;
-  const open = Object.values(s.games).filter(g => g.status !== "done"), marked = open.filter(g => g.status === "skipped").length;
+  const pend = Object.values(s.games).filter(g => g.status === "pending" && !Ladder.deadGame(s, g)).length;
+  const open = Object.values(s.games).filter(g => g.status !== "done" && !Ladder.deadGame(s, g)), marked = open.filter(g => g.status === "skipped").length;
   const done = Object.values(s.games).filter(g => g.status === "done").length;
   const inPools = s.pools.flatMap(p => p.players);
   const bench = Object.values(app.st.players).filter(p => p.active && !inPools.includes(p.id)).sort((a, b) => a.name.localeCompare(b.name));
@@ -1147,7 +1162,7 @@ function orgLive(s) {
   return `<div class="row spread"><h2>${niceDate(s.date)} <span class="live-dot">Live</span></h2><a class="btn small" href="#/board">Open all courts</a></div>
   <div class="card"><h2>Progress</h2>
     ${s.pools.map(p => { const r = roundInfo(s, p);
-      return `<div class="row spread"><a href="#/court/${p.id}" class="back" style="min-height:0">${esc(p.name)}</a><span class="num muted">${r.finished ? "Finished" : `Round ${r.at + 1} of ${r.total}`} · ${r.done} of ${r.playable} games</span></div><span class="bar on-surface"><i style="width:${pct(r)}%"></i></span>`; }).join("")}</div>
+      return `<div class="row spread"><a href="#/court/${p.id}" class="back" style="min-height:0">${esc(p.name)}</a><span class="num muted">${r.finished ? "Finished" : roundName(r, r.at)} · ${r.done} of ${r.playable} games</span></div><span class="bar on-surface"><i style="width:${pct(r)}%"></i></span>`; }).join("")}</div>
 
   <div class="card"><h2>Finish the session</h2>
     <p class="muted">Finishing locks the scores and updates every rating. ${!done ? "<b>No scores have been entered yet</b>, so there is nothing to finish. Go back to setup or delete the session instead." : pend ? `<b>${pend} games have no score</b> and will be recorded as not played.` : "All games have a score."}</p>
@@ -1172,7 +1187,7 @@ function orgLive(s) {
   <div class="card"><div class="row spread"><h2>Games not played</h2>
       ${open.length ? `<button class="btn small${app.showSkip ? "" : " primary"}" data-act="toggleSkip">${app.showSkip ? "Hide the list" : "Choose games"}</button>` : ""}</div>
     <p class="muted">Mark a game as not played if it will not happen in this session. ${!open.length ? "Every game has a score." : `${open.length === 1 ? "1 game has" : open.length + " games have"} no score${marked ? `, ${marked} marked not played` : ""}.`}</p>
-    ${!app.showSkip || !open.length ? "" : s.pools.map(p => { const gs = poolGames(s, p).filter(g => g.status !== "done");
+    ${!app.showSkip || !open.length ? "" : s.pools.map(p => { const gs = poolGames(s, p).filter(g => g.status !== "done" && !Ladder.deadGame(s, g));
       return gs.length ? `<h3>${esc(p.name)}</h3><div class="results">${gs.map(g => `<div class="res"><span class="rd">R${g.round + 1}</span><span class="who">${teamLine(g.t1)} v ${teamLine(g.t2)}${g.status === "skipped" ? ' <span class="sc muted">not played</span>' : ""}</span>
         <button class="btn small" data-act="skip" data-sid="${s.id}" data-gid="${g.id}" data-skip="${g.status === "skipped" ? "" : "1"}">${g.status === "skipped" ? "Restore" : "Not played"}</button></div>`).join("")}</div>` : ""; }).join("")}</div>`;
 }
@@ -1314,7 +1329,7 @@ function viewDialog() {
   const done = Object.values(s.games).filter(g => g.status === "done").length, scores = done === 1 ? "1 score" : done + " scores";
   if (d.kind === "start") {
     if (s.status !== "setup") { app.dialog = null; return ""; }
-    const odd = outOfOrder(s), plans = s.pools.map(p => ({ p, plan: poolPlan(p.players.length, p.courts), warn: poolWarn(s, p) })), slow = plans.filter(x => x.warn);
+    const odd = outOfOrder(s), plans = s.pools.map(p => ({ p, plan: poolPlan(p.players.length, p.courts, Ladder.isBo3(p)), warn: poolWarn(s, p) })), slow = plans.filter(x => x.warn);
     const placed = new Set(s.pools.flatMap(p => p.players)), loose = s.attending.filter(id => !placed.has(id));
     const stop = (s.pools.length ? [] : ["No pools have been made yet."])
       .concat(plans.filter(x => !x.plan).map(x => `${x.p.name} has ${x.p.players.length} player${x.p.players.length === 1 ? "" : "s"}. A pool needs ${Ladder.MIN_POOL} to ${Ladder.MAX_POOL}.`))
@@ -1323,7 +1338,7 @@ function viewDialog() {
       ${stop.length ? `<p class="err" role="alert">${stop.map(esc).join("<br>")}</p>` : ""}
       ${s.pools.length ? `<p class="lead"><b>${s.pools.reduce((n, p) => n + p.players.length, 0)} players</b> in <b>${s.pools.length} pool${s.pools.length === 1 ? "" : "s"}</b>. ${new Set(s.pools.map(p => targetFor(s, p))).size === 1 ? `Every game is first to <b>${targetFor(s, s.pools[0])}</b>, win by 1.` : "Each pool plays first to the number shown, win by 1."}</p>
       <div class="sumwrap"><table class="sum"><thead><tr><th>Pool</th><th class="r">Players</th><th class="r">Rounds</th><th class="r">Games each</th><th class="r">First to</th><th class="r">Courts</th></tr></thead><tbody>
-        ${plans.map(({ p, plan }) => (plan ? `<tr><td><b>${esc(p.name)}</b></td><td class="r">${p.players.length}</td><td class="r">${plan.rounds}</td><td class="r">${plan.each}</td><td class="r">${targetFor(s, p)}</td><td class="r">${p.courts}</td></tr>`
+        ${plans.map(({ p, plan }) => (plan ? `<tr><td><b>${esc(p.name)}</b></td><td class="r">${p.players.length}</td><td class="r">${plan.bo3 ? "Bo3" : plan.rounds}</td><td class="r">${plan.bo3 ? "6-9" : plan.each}</td><td class="r">${targetFor(s, p)}</td><td class="r">${p.courts}</td></tr>`
           : `<tr class="bad"><td><b>${esc(p.name)}</b></td><td class="r">${p.players.length}</td><td colspan="4">needs ${Ladder.MIN_POOL} to ${Ladder.MAX_POOL} players</td></tr>`)).join("")}</tbody></table></div>` : ""}
       ${slow.length ? `<p class="note warn">⚠ ${slow.map(x => `<b>${esc(x.p.name)}</b>: ${x.warn}`).join("<br>")}</p>` : ""}
       ${odd.length ? `<p class="lead"><b>${odd.length === 1 ? "1 player is" : odd.length + " players are"} out of rating order</b> because the pools were changed by hand:</p>
@@ -1573,6 +1588,7 @@ const A = {
   }),
   move: d => { app.sel = null; return act("pools", "session.move", { sid: d.sid, pid: d.pid, to: d.to }); },
   courts: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, courts: +d.courts }),
+  pbest: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, bestOf: +d.best }),
   ptarget: d => act("pools", "session.pool", { sid: d.sid, pool: d.pool, target: d.target === "auto" ? "auto" : +d.target }),
   start: async d => {
     if (!d.force) { app.dialog = { kind: "start", sid: d.sid, busy: false, err: "" }; return render(); }     // always a summary first

@@ -125,13 +125,20 @@ def _ranker(n):
     return [[tuple((int(side[0]) - 1, int(side[1]) - 1) for side in m.split("v")) for m in rd.split(" ")] for rd in RANKER[n].split("|")]
 
 
-def generate(players, seed=0, mode=None):
+# Best of 3 for a pool of four: its three pairings as matches of up to three games, slots 1 and 4 against 2 and 3 first.
+BO3 = [((0, 3), (1, 2)), ((0, 2), (1, 3)), ((0, 1), (2, 3))]
+
+
+def generate(players, seed=0, mode=None, best_of=None):
     """players: list of ids. Returns rounds: [[(pair, pair), ...], ...] using those ids.
+    best_of 3 with four players: nine rounds, each pairing three times running (docs/core.js has the rule for the third game).
     mode "ranker": eights and nines get pickleballranker's fixed rounds, players taken in the order given.
     mode "closest": the same games, rounds in the CLOSEST order."""
     n = len(players)
     if not MIN_POOL <= n <= MAX_POOL:
         raise ValueError("a pool needs %d to %d players, got %d" % (MIN_POOL, MAX_POOL, n))
+    if best_of == 3 and n == 4:
+        return [[((players[a], players[b]), (players[c], players[d]))] for (a, b), (c, d) in BO3 for _ in range(3)]
     fixed = _ranker(n) if mode in ("ranker", "closest") else None
     if fixed and mode == "closest":
         fixed = [fixed[k - 1] for k in CLOSEST[n]]

@@ -262,13 +262,28 @@
      Worked out from typical 4DR by slot over seasons five to seven. It changes the night, not the ratings. */
   const CLOSEST = { 8: [1, 3, 5, 4, 6, 7, 2], 9: [9, 3, 1, 2, 4, 7, 6, 8, 5] };
   const rankerDesign = n => (RANKER[n] ? RANKER[n].split("|").map(rd => rd.split(" ").map(m => m.split("v").map(side => [side[0] - 1, side[1] - 1]))) : null);
+  /* Best of 3: a pool of four can play its three pairings as matches, each the best of three games. Rounds 1 to 3 are the
+     first match (slots 1 and 4 against 2 and 3), 4 to 6 the second, 7 to 9 the third, the same pairs on the same sides
+     each time. A match's third game is not needed once one pair has won the first two: that round is passed over when
+     the round before it is confirmed, and Finish records it as not played. */
+  const BO3 = [[[0, 3], [1, 2]], [[0, 2], [1, 3]], [[0, 1], [2, 3]]];
+  const isBo3 = pool => !!pool && pool.bestOf === 3 && pool.players.length === 4 && (!pool.rounds || !pool.rounds.length || pool.rounds.length === 9);
+  function deadRound(s, pool, round) {
+    if (!isBo3(pool) || round % 3 !== 2 || !pool.rounds || !pool.rounds[round]) return false;
+    const a = s.games[pool.rounds[round - 2][0]], b = s.games[pool.rounds[round - 1][0]], c = s.games[pool.rounds[round][0]];
+    return !!(a && b && c && c.status === "pending" && a.status === "done" && b.status === "done" && (a.s1 > a.s2) === (b.s1 > b.s2));
+  }
+  const deadGame = (s, g) => { const pool = g && g.status === "pending" ? s.pools.find(p => p.id === g.pool) : null; return !!pool && deadRound(s, pool, g.round); };
+  /* The round a pool moves on to when this one is confirmed. */
+  const nextRound = (s, pool, round) => { let n = round + 1; while (n < pool.rounds.length && deadRound(s, pool, n)) n++; return n; };
   /* players: ids. Returns rounds: [[[pair, pair], ...], ...] using those ids. Same seed, same schedule.
      mode "ranker": eights and nines get the fixed schedule above, with the players taken in the order given (the pool's
      own order, highest 4DR first). mode "closest": the same games, rounds in the CLOSEST order.
      Any other size, or any other mode, is drawn as before. */
-  function generate(players, seed, mode) {
+  function generate(players, seed, mode, bestOf) {
     const n = players.length;
     if (n < MIN_POOL || n > MAX_POOL) throw new Error(`a pool needs ${MIN_POOL} to ${MAX_POOL} players, got ${n}`);
+    if (bestOf === 3 && n === 4) return BO3.flatMap(([[a, b], [c, d]]) => [0, 1, 2].map(() => [[[players[a], players[b]], [players[c], players[d]]]]));
     const base = mode === "ranker" || mode === "closest" ? rankerDesign(n) : null;
     const fixed = base && mode === "closest" ? CLOSEST[n].map(k => base[k - 1]) : base;
     if (fixed) return fixed.map(rd => rd.map(([[a, b], [c, d]]) => [[players[a], players[b]], [players[c], players[d]]]));
@@ -572,6 +587,12 @@
       if (!choices.includes(t)) fail("invalid", `A pool can play first to ${choices.join(", ").replace(/, ([^,]*)$/, " or $1")}.`);
       pool.target = t; delete pool.autoTarget;
     }
+    if ("bestOf" in a) {
+      const s2 = getSession(st, a.sid, "setup");                        // the format is fixed once the session has started
+      if (parseInt(a.bestOf, 10) === 3) { if (pool.players.length !== 4) fail("invalid", "Best of 3 is for a pool of four."); pool.bestOf = 3; }
+      else delete pool.bestOf;
+      clearSchedule(s2);
+    }
   };
   H["session.schedule"] = (st, a) => {
     const s = getSession(st, a.sid, "setup");
@@ -582,7 +603,8 @@
     s.games = {};
     for (const pool of s.pools) {
       pool.confirmed = 0;
-      pool.rounds = generate(pool.players, s.id + pool.id, st.league.schedule).map((rd, ri) => rd.map(([t1, t2]) => {
+      if (pool.bestOf && pool.players.length !== 4) delete pool.bestOf;
+      pool.rounds = generate(pool.players, s.id + pool.id, st.league.schedule, pool.bestOf).map((rd, ri) => rd.map(([t1, t2]) => {
         const gid = nextId(st, "g");
         s.games[gid] = { id: gid, pool: pool.id, round: ri, t1, t2, s1: null, s2: null, status: "pending" };
         return gid;
@@ -650,14 +672,14 @@
   };
   H["game.skip"] = (st, a, org) => { const { g } = getGame(st, a, org); if (g.status === "done") fail("scores", "Clear the score first."); g.status = a.skip === false ? "pending" : "skipped"; delete g.auto; };
   /* A round is ready to confirm when none of its games is still waiting for a score. */
-  const roundReady = (s, pool, round) => (pool.rounds[round] || []).length > 0 && pool.rounds[round].every(id => s.games[id] && s.games[id].status !== "pending");
+  const roundReady = (s, pool, round) => (pool.rounds[round] || []).length > 0 && pool.rounds[round].every(id => s.games[id] && (s.games[id].status !== "pending" || deadRound(s, pool, round)));
   H["round.confirm"] = (st, a) => {
     const s = getSession(st, a.sid, "live"), pool = s.pools.find(p => p.id === a.pool) || fail("missing", "Pool not found.");
     const round = parseInt(a.round, 10), at = pool.confirmed || 0;
     if (round < at) return { round: at };                       // another device already moved this pool on
     if (round > at || round >= pool.rounds.length) fail("order", "That round is not being played yet.");
     if (!roundReady(s, pool, round)) fail("scores", "Enter every score in this round first.");
-    pool.confirmed = round + 1;
+    pool.confirmed = nextRound(s, pool, round);
     return { round: pool.confirmed };
   };
   /* Organiser only: undo a confirm made too early. Scores are untouched. */
@@ -712,6 +734,6 @@
     return result;
   }
 
-  Object.assign(L, { RANKER, CLOSEST, RATINGS, playedOrder, seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
+  Object.assign(L, { RANKER, CLOSEST, RATINGS, playedOrder, seasonOf, availCount, availCheck, rng, allOrders, compute, roundCount, poolCount, courtsFor, targetChoices, autoTarget, poolTarget, gameTarget, BONUS_BASE, generate, isBo3, deadRound, deadGame, nextRound, summary, emptyState, normalize, apply, scoreGame, checkScore, roundReady, closeSession,
     ActionError, OPEN_ACTIONS, MIN_POOL, MAX_POOL });
 })(typeof module !== "undefined" && module.exports ? module.exports : (window.Ladder = {}));
